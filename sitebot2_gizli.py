@@ -376,7 +376,7 @@ def sikayet_al():
 
         # Supabase'e kaydet (web kaynağını belirt)
         supabase.table("sikayetler").insert({
-            "sakin_id": 0,  # Web formundan geldi, telegram_id yok
+            "sakin_id": None,  # Web formundan geldi, telegram_id yok
             "kategori": kategori,
             "aciklama": aciklama,
             "takip_kodu": kod,
