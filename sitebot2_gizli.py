@@ -114,12 +114,20 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data.startswith("detay_"):
         kod = query.data.split("_")[1]
         s = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute().data[0]
+        # Hangi listeden geldiğini anlamak için mevcut durumu yakalıyoruz
+        donulecek_liste = "liste_inceleme" if s['durum'] == "İnceleniyor" else "liste_yeni"
+        
         txt = f"📋 **{kod}**\n👤 {s['ad_soyad']}\n🏠 {s['daire_no']}\n📝 {s['aciklama']}\n🟢 {s['durum']}"
-        kb = [[InlineKeyboardButton("⏳ İncelemeye Al", callback_data=f"durum_inceleme_{kod}"), InlineKeyboardButton("✅ Çözüldü", callback_data=f"durum_cozuldu_{kod}")], [InlineKeyboardButton("⬅️ Listeye Dön", callback_data="liste_yeni")]]
+        kb = [
+            [InlineKeyboardButton("⏳ İncelemeye Al", callback_data=f"durum_inceleme_{kod}"), 
+             InlineKeyboardButton("✅ Çözüldü", callback_data=f"durum_cozuldu_{kod}")], 
+            [InlineKeyboardButton("⬅️ Listeye Dön", callback_data=donulecek_liste)] # Dinamik dönüş
+        ]
         try: await query.message.delete()
         except: pass
         if s.get('fotograf_url'): await context.bot.send_photo(query.message.chat_id, s['fotograf_url'], caption=txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
         else: await context.bot.send_message(query.message.chat_id, txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+            
     elif query.data.startswith("durum_"):
         _, yeni, kod = query.data.split("_")
         d = "İnceleniyor" if yeni == "inceleme" else "Çözüldü"
