@@ -20,7 +20,7 @@ YONETICI_ID = os.getenv("YONETICI_ID")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Durumlar
-AD, DAIRE, SIKAYET_DETAY = range(3)
+AD, DAIRE, KAT_BLOK, SIKAYET_DETAY = range(4)
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
 def takip_kodu_uret():
@@ -59,13 +59,21 @@ async def get_ad(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return DAIRE
 
 async def get_daire(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    daire = update.message.text
+    context.user_data['daire_no'] = update.message.text
+    await update.message.reply_text("Dairenizin bulunduğu Kat ve Blok bilgisini girin (Örn: 5. Kat, A Blok):")
+    return KAT_BLOK
+
+async def get_kat_blok(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kat_blok = update.message.text
+    chat_id = update.message.chat_id
+    # Veritabanına tüm bilgileri birlikte kaydet
     supabase.table("sakinler").insert({
-        "telegram_id": str(update.message.chat_id),
+        "telegram_id": str(chat_id),
         "ad_soyad": context.user_data['ad_soyad'],
-        "daire_no": daire
+        "daire_no": context.user_data['daire_no'],
+        "kat_blok": kat_blok
     }).execute()
-    await update.message.reply_text("Kaydınız tamamlandı! Kategori seçin:", reply_markup=kategori_klavyesi())
+    await update.message.reply_text("✅ Kaydınız tamamlandı! Kategori seçin:", reply_markup=kategori_klavyesi())
     return SIKAYET_DETAY
 
 def kategori_klavyesi():
