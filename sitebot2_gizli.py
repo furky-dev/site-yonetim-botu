@@ -19,6 +19,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Durum Sabitleri
 AD, DAIRE = range(2)
+ONCELIK, KAT = range(2, 4)
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
 def takip_kodu_uret():
@@ -278,6 +279,21 @@ HTML_FORM = """
       </div>
     </div>
 
+    <div class="row">
+      <div class="field">
+        <label>Kat / Blok</label>
+        <input type="text" id="kat_blok" placeholder="3. Kat / A Blok">
+      </div>
+      <div class="field">
+        <label>Öncelik</label>
+        <select id="oncelik">
+          <option value="Normal">🟡 Normal</option>
+          <option value="Acil">🔴 Acil</option>
+          <option value="Öneri">🟢 Öneri</option>
+        </select>
+      </div>
+    </div>
+
     <div class="field">
       <label>Kategori</label>
       <select id="kategori">
@@ -311,6 +327,8 @@ async function gonder() {
   const daire = document.getElementById('daire_no').value.trim();
   const kategori = document.getElementById('kategori').value;
   const aciklama = document.getElementById('aciklama').value.trim();
+  const oncelik = document.getElementById('oncelik').value;
+  const kat_blok = document.getElementById('kat_blok').value.trim();
   const errEl = document.getElementById('errorMsg');
   const btn = document.getElementById('submitBtn');
 
@@ -329,7 +347,7 @@ async function gonder() {
     const res = await fetch('/sikayet', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ad_soyad: ad, daire_no: daire, kategori, aciklama})
+      body: JSON.stringify({ad_soyad: ad, daire_no: daire, kategori, aciklama, oncelik, kat_blok})
     });
     const data = await res.json();
 
@@ -368,29 +386,38 @@ def sikayet_al():
         daire_no  = data.get("daire_no", "").strip()
         kategori  = data.get("kategori", "Diğer")
         aciklama  = data.get("aciklama", "").strip()
+        oncelik   = data.get("oncelik", "Normal")
+        kat_blok  = data.get("kat_blok", "").strip()
 
         if not all([ad_soyad, daire_no, aciklama]):
             return jsonify({"success": False, "error": "Eksik alan"}), 400
 
         kod = takip_kodu_uret()
 
-        # Supabase'e kaydet (web kaynağını belirt)
+        oncelik_emoji = {"Acil": "🔴", "Normal": "🟡", "Öneri": "🟢"}.get(oncelik, "🟡")
+
+        # Supabase'e kaydet
         supabase.table("sikayetler").insert({
-            "sakin_id": None,  # Web formundan geldi, telegram_id yok
+            "sakin_id": None,
             "kategori": kategori,
             "aciklama": aciklama,
             "takip_kodu": kod,
             "durum": "beklemede",
             "kaynak": "web",
             "ad_soyad": ad_soyad,
-            "daire_no": daire_no
+            "daire_no": daire_no,
+            "oncelik": oncelik,
+            "kat_blok": kat_blok
         }).execute()
 
-        # Telegram'a bildirim gönder
+        # Telegram bildirimi — web ile aynı format
+        kat_blok_satir = f"📍 {kat_blok}\n" if kat_blok else ""
         msg = (
-            f"🌐 *YENİ (Web Formu)*\n"
+            f"🌐 *YENİ ŞİKAYET (Web)*\n"
             f"👤 {ad_soyad} — Daire {daire_no}\n"
+            f"{kat_blok_satir}"
             f"📂 {kategori}\n"
+            f"{oncelik_emoji} {oncelik}\n"
             f"📝 {aciklama}\n"
             f"🔖 `{kod}`"
         )
@@ -469,15 +496,43 @@ async def kategori_secimi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     if query.data in ['Asansör', 'Aydınlatma', 'Temizlik', 'Gürültü', 'Diğer']:
         context.user_data['secilen_kategori'] = query.data
-        context.user_data['bekliyor_mu'] = True
-        await query.edit_message_text(text=f"📂 Kategori: {query.data}\nŞikayetinizi yazın:")
+        kb = [
+            [InlineKeyboardButton("🔴 Acil", callback_data='oncelik_Acil')],
+            [InlineKeyboardButton("🟡 Normal", callback_data='oncelik_Normal')],
+            [InlineKeyboardButton("🟢 Öneri", callback_data='oncelik_Öneri')],
+        ]
+        await query.edit_message_text(
+            text=f"📂 Kategori: {query.data}\nÖncelik seçin:",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+
+async def oncelik_secimi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    oncelik = query.data.split("_")[1]
+    context.user_data['secilen_oncelik'] = oncelik
+    await query.edit_message_text(
+        text=f"📂 {context.user_data['secilen_kategori']} | {oncelik}\n\nKat / Blok bilgisi (opsiyonel):\nYazın veya 'geç' yazarak atlayın:"
+    )
+    context.user_data['bekliyor_kat'] = True
 
 async def sikayet_kaydet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('bekliyor_kat'):
+        metin = update.message.text.strip()
+        context.user_data['kat_blok'] = "" if metin.lower() == "geç" else metin
+        context.user_data['bekliyor_kat'] = False
+        context.user_data['bekliyor_mu'] = True
+        await update.message.reply_text("📝 Şikayetinizi yazın:")
+        return
+
     if not context.user_data.get('bekliyor_mu'):
         return
 
     user_id = update.effective_user.id
     kod = takip_kodu_uret()
+    oncelik = context.user_data.get('secilen_oncelik', 'Normal')
+    kat_blok = context.user_data.get('kat_blok', '')
+    oncelik_emoji = {"Acil": "🔴", "Normal": "🟡", "Öneri": "🟢"}.get(oncelik, "🟡")
 
     res = supabase.table("sakinler").select("*").eq("telegram_id", user_id).execute()
     sakin = res.data[0]
@@ -488,13 +543,24 @@ async def sikayet_kaydet(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "aciklama": update.message.text,
         "takip_kodu": kod,
         "durum": "beklemede",
-        "kaynak": "telegram"
+        "kaynak": "telegram",
+        "oncelik": oncelik,
+        "kat_blok": kat_blok
     }).execute()
 
     context.user_data['bekliyor_mu'] = False
     await update.message.reply_text(f"✅ Şikayet iletildi. Kod: {kod}")
 
-    admin_m = f"📩 **YENİ!**\n{sakin['ad_soyad']} ({sakin['daire_no']})\n{kod}: {update.message.text}"
+    kat_satir = f"📍 {kat_blok}\n" if kat_blok else ""
+    admin_m = (
+        f"✈️ *YENİ ŞİKAYET (Telegram)*\n"
+        f"👤 {sakin['ad_soyad']} — Daire {sakin['daire_no']}\n"
+        f"{kat_satir}"
+        f"📂 {context.user_data.get('secilen_kategori', 'Diğer')}\n"
+        f"{oncelik_emoji} {oncelik}\n"
+        f"📝 {update.message.text}\n"
+        f"🔖 `{kod}`"
+    )
     kb = [[InlineKeyboardButton("⚙️ İnceleniyor", callback_data=f"durum_incele_{kod}"),
            InlineKeyboardButton("✅ Çözüldü", callback_data=f"durum_cozuldu_{kod}")]]
     await context.bot.send_message(chat_id=YONETICI_ID, text=admin_m, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
@@ -599,6 +665,7 @@ if __name__ == '__main__':
     ))
 
     app.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansör|Aydınlatma|Temizlik|Gürültü|Diğer)$"))
+    app.add_handler(CallbackQueryHandler(oncelik_secimi, pattern="^oncelik_"))
     app.add_handler(CallbackQueryHandler(buton_islem, pattern="^(liste_|yonet_|durum_|panele_don)"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, sikayet_kaydet))
 
