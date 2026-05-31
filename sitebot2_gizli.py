@@ -467,6 +467,7 @@ async def handle_photo_complaint(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("Lütfen önce /start komutu ile bir şikayet kategorisi seçiniz.")
         return
 
+    # Supabase'den sakini sorgula
     res_sakin = supabase.table("sakinler").select("*").eq("sakin_id", chat_id).execute()
     if not res_sakin.data:
         await update.message.reply_text("Lütfen önce /start yazarak kayıt işlemlerinizi tamamlayınız.")
@@ -479,6 +480,7 @@ async def handle_photo_complaint(update: Update, context: ContextTypes.DEFAULT_T
     await update.message.reply_text("🔄 Fotoğrafınız alınıyor ve şikayet kaydınız oluşturuluyor, lütfen bekleyin...")
 
     try:
+        # Fotoğrafı Telegram'dan indir
         photo_file = await update.message.photo[-1].get_file()
         
         photo_bytes = io.BytesIO()
@@ -488,19 +490,22 @@ async def handle_photo_complaint(update: Update, context: ContextTypes.DEFAULT_T
         file_name = f"{chat_id}_{update.message.message_id}.jpg"
         bucket_name = "sikayet-fotograflari"
         
+        # 1. Fotoğrafı Supabase Storage'a yükle
         supabase.storage.from_(bucket_name).upload(
             path=file_name,
             file=photo_bytes.getvalue(),
             file_options={"content-type": "image/jpeg"}
         )
         
+        # 2. Fotoğrafın herkese açık URL'sini al
         photo_url = supabase.storage.from_(bucket_name).get_public_url(file_name)
         
+        # 3. Veritabanına kaydet (Sütun isimleri tam olarak senin Supabase yapınla eşitlendi)
         supabase.table("sikayetler").insert({
             "kod": kod,
             "sakin_id": chat_id,
-            "ad_soyad": sakin['ad_soyad'],
-            "daire_no": sakin['daire_no'],
+            "ad_soyad": sakin.get('ad_soyad'),
+            "daire_no": sakin.get('daire_no'),
             "kategori": kategori,
             "detay": "Fotoğraflı şikayet bildirim şablonu (Ekli görseli inceleyiniz).",
             "durum": "Beklemede",
@@ -508,22 +513,29 @@ async def handle_photo_complaint(update: Update, context: ContextTypes.DEFAULT_T
             "fotograf_url": photo_url
         }).execute()
         
+        # 4. Yöneticiye fotoğraflı bildirim gönder
         if YONETICI_ID:
             bildirim_metni = (
                 f"🚨 *Telegram'dan Yeni Fotoğraflı Şikayet!*\n\n"
                 f"🔑 *Kod:* `{kod}`\n"
-                f"👤 *Sakin:* {sakin['ad_soyad']} ({sakin['daire_no']})\n"
+                f"👤 *Sakin:* {sakin.get('ad_soyad')} ({sakin.get('daire_no')})\n"
                 f"📂 *Kategori:* {kategori}\n"
                 f"📝 *Durum:* Görsel ekte yer almaktadır."
             )
-            await context.bot.send_photo(
-                chat_id=YONETICI_ID,
-                photo=photo_url,
-                caption=bildirim_metni,
-                parse_mode="Markdown"
-            )
+            try:
+                await context.bot.send_photo(
+                    chat_id=int(YONETICI_ID),
+                    photo=photo_url,
+                    caption=bildirim_metni,
+                    parse_mode="Markdown"
+                )
+            except Exception as admin_err:
+                print(f"Yöneticiye fotoğraf gönderilemedi: {admin_err}")
 
-        del user_data['secilen_kategori']
+        # Başarılı çıkış ve temizlik
+        if 'secilen_kategori' in user_data:
+            del user_data['secilen_kategori']
+            
         await update.message.reply_text(
             f"✅ Şikayetiniz fotoğraflı olarak başarıyla alınmış ve yöneticiye iletilmiştir!\n\n"
             f"🔑 Takip Kodunuz: *{kod}*",
@@ -532,6 +544,8 @@ async def handle_photo_complaint(update: Update, context: ContextTypes.DEFAULT_T
 
     except Exception as e:
         print(f"Fotoğraf Yükleme Hatası: {e}")
+        # Hatanın tam nedenini loglara basıyoruz ki Railway'de görebilelim
+        logging.error(f"Kritik Hata Detayı: {str(e)}")
         await update.message.reply_text("❌ Şikayetiniz kaydedilirken veya fotoğraf yüklenirken teknik bir sorun oluştu.")
 
 async def handle_complaint_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
