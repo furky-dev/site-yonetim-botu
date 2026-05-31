@@ -73,11 +73,63 @@ async def panel_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    durum_map = {"liste_yeni": "Beklemede", "liste_inceleme": "İnceleniyor"}
-    sikayetler = supabase.table("sikayetler").select("*").eq("durum", durum_map[query.data]).execute().data
-    text = f"📊 **{durum_map[query.data]} Şikayetler:**\n\n"
-    for s in sikayetler: text += f"🔹 {s['takip_kodu']} | {s['ad_soyad']} - {s['daire_no']}\n"
-    await query.edit_message_text(text or "📭 Boş.", parse_mode="Markdown")
+    
+    # LİSTELEME
+    if query.data.startswith("liste_"):
+        durum_map = {"liste_yeni": "Beklemede", "liste_inceleme": "İnceleniyor", "liste_cozuldu": "Çözüldü"}
+        durum = durum_map[query.data]
+        sikayetler = supabase.table("sikayetler").select("*").eq("durum", durum).execute().data
+        
+        keyboard = []
+        for s in sikayetler:
+            keyboard.append([InlineKeyboardButton(f"{s['takip_kodu']} - {s['ad_soyad']}", callback_data=f"detay_{s['takip_kodu']}")])
+        keyboard.append([InlineKeyboardButton("⬅️ Ana Menü", callback_data="liste_menu")])
+        await query.edit_message_text(f"📊 **{durum} Şikayetler:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    # DETAY GÖRÜNTÜLEME
+    elif query.data.startswith("detay_"):
+        kod = query.data.split("_")[1]
+        s = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute().data[0]
+        
+        text = f"📋 **Detay: {kod}**\n👤 {s['ad_soyad']} | 🏠 {s['daire_no']}\n📂 {s['kategori']}\n📝 {s['aciklama']}\n\nDurum: {s['durum']}"
+        kb = [
+            [InlineKeyboardButton("⏳ İncelemeye Al", callback_data=f"durum_inceleme_{kod}"), 
+             InlineKeyboardButton("✅ Çözüldü", callback_data=f"durum_cozuldu_{kod}")],
+            [InlineKeyboardButton("⬅️ Listeye Dön", callback_data="liste_yeni")]
+        ]
+        
+        if s.get('fotograf_url'):
+            await query.message.reply_photo(photo=s['fotograf_url'], caption=text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+            await query.message.delete()
+        else:
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+
+    # DURUM GÜNCELLEME (Sakine bildirim gider)
+    elif query.data.startswith("durum_"):
+        _, yeni_durum, kod = query.data.split("_")
+        durum_text = "İnceleniyor" if yeni_durum == "inceleme" else "Çözüldü"
+        
+        supabase.table("sikayetler").update({"durum": durum_text}).eq("takip_kodu", kod).execute()
+        
+        # Sakini bul ve bilgilendir
+        s = supabase.table("sikayetler").select("sakin_id").eq("takip_kodu", kod).execute().data[0]
+        await context.bot.send_message(chat_id=int(s['sakin_id']), text=f"🔔 Şikayetiniz ({kod}) durumu: **{durum_text}** olarak güncellendi.", parse_mode="Markdown")
+        
+        await query.answer("✅ Güncellendi ve sakine bildirildi!")
+        await query.edit_message_text(f"✅ İşlem başarılı: {kod} -> {durum_text}")
+
+# --- SAKİN TAKİP KOMUTU ---
+async def takip(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Lütfen kod girin. Örn: /takip #SB-1234")
+        return
+    kod = context.args[0]
+    res = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute()
+    if res.data:
+        s = res.data[0]
+        await update.message.reply_text(f"🔎 **Şikayet Durumu:**\nKod: {kod}\nDurum: {s['durum']}")
+    else:
+        await update.message.reply_text("❌ Kod bulunamadı.")
 
 # --- ŞİKAYET İŞLEMLERİ ---
 def kategori_klavyesi():
