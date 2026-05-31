@@ -35,18 +35,30 @@ async def upload_photo_to_supabase(file_id, context):
     except: return None
 
 # --- BOT AKIŞI ---
+# --- YENİLENMİŞ BAŞLANGIÇ ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
-    if str(chat_id) == str(YONETICI_ID):
-        await update.message.reply_text("👮‍♂️ Yönetici paneline hoş geldiniz. /panel yazarak şikayetleri görüntüleyin.")
-        return ConversationHandler.END
     
+    # Kullanıcı yönetici mi değil mi kontrolü
+    if str(chat_id) == str(YONETICI_ID):
+        await update.message.reply_text("👮‍♂️ Yönetici paneline hoş geldiniz. Şikayetleri görmek için /panel yazın.")
+        return ConversationHandler.END # Yönetici için konuşmayı bitiriyoruz
+    
+    # Normal kullanıcı için kayıt kontrolü
     res = supabase.table("sakinler").select("*").eq("telegram_id", str(chat_id)).execute()
     if res.data:
         await update.message.reply_text("👋 Tekrar hoş geldiniz! Şikayet kategorinizi seçin:", reply_markup=kategori_klavyesi())
         return SIKAYET_DETAY
+        
     await update.message.reply_text("🏠 Premium Residence'a hoş geldiniz.\nLütfen Adınızı ve Soyadınızı girin:")
     return AD
+
+# --- YENİ PANEL KOMUTU ---
+async def panel_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if str(update.message.chat_id) != str(YONETICI_ID):
+        await update.message.reply_text("❌ Bu komutu sadece yönetici kullanabilir.")
+        return
+    await yonetici_panel(update, context) # Yukarıda tanımladığımız paneli çağır
 
 async def get_ad(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['ad_soyad'] = update.message.text
