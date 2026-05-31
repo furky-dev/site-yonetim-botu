@@ -38,7 +38,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if res.data:
         await update.message.reply_text("👋 Tekrar hoş geldiniz! Kategori seçin:", reply_markup=kategori_klavyesi())
         return SIKAYET_DETAY
-    await update.message.reply_text("🏠 Premium Residence'a hoş geldiniz. Lütfen Adınızı ve Soyadınızı girin:")
+    await update.message.reply_text("🏠 Premium Residence'a hoş geldiniz. Adınızı ve Soyadınızı girin:")
     return AD
 
 async def get_ad(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -53,123 +53,66 @@ async def get_daire(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_kat_blok(update: Update, context: ContextTypes.DEFAULT_TYPE):
     supabase.table("sakinler").insert({
-        "telegram_id": str(update.message.chat_id),
-        "ad_soyad": context.user_data['ad_soyad'],
-        "daire_no": context.user_data['daire_no'],
-        "kat_blok": update.message.text
+        "telegram_id": str(update.message.chat_id), "ad_soyad": context.user_data['ad_soyad'],
+        "daire_no": context.user_data['daire_no'], "kat_blok": update.message.text
     }).execute()
-    await update.message.reply_text("✅ Kaydınız tamamlandı! Kategori seçin:", reply_markup=kategori_klavyesi())
+    await update.message.reply_text("✅ Kayıt tamam! Kategori seçin:", reply_markup=kategori_klavyesi())
     return SIKAYET_DETAY
 
-# --- YÖNETİCİ PANELİ ---
-async def panel_komutu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.message.chat_id) != str(YONETICI_ID): return
+# --- YÖNETİCİ PANELİ VE NAVİGASYON ---
+async def yonetici_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     yeni = supabase.table("sikayetler").select("*", count='exact').eq("durum", "Beklemede").execute().count
     inceleme = supabase.table("sikayetler").select("*", count='exact').eq("durum", "İnceleniyor").execute().count
-    keyboard = [[InlineKeyboardButton(f"🆕 Yeni ({yeni})", callback_data="liste_yeni"), 
-                 InlineKeyboardButton(f"⏳ İnceleniyor ({inceleme})", callback_data="liste_inceleme")]]
-    await update.message.reply_text("⚙️ **Yönetici Paneli**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    keyboard = [
+        [InlineKeyboardButton(f"🆕 Yeni ({yeni})", callback_data="liste_yeni"), 
+         InlineKeyboardButton(f"⏳ İnceleme ({inceleme})", callback_data="liste_inceleme")]
+    ]
+    if update.callback_query:
+        await update.callback_query.edit_message_text("⚙️ **Yönetici Paneli**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text("⚙️ **Yönetici Paneli**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    # 1. LİSTELEME
     if query.data.startswith("liste_"):
         if query.data == "liste_menu": return await yonetici_panel(update, context)
+        d_map = {"liste_yeni": "Beklemede", "liste_inceleme": "İnceleniyor"}
+        items = supabase.table("sikayetler").select("*").eq("durum", d_map[query.data]).execute().data
+        kb = [[InlineKeyboardButton(f"{s['takip_kodu']} | {s['ad_soyad']}", callback_data=f"detay_{s['takip_kodu']}")] for s in items]
+        kb.append([InlineKeyboardButton("⬅️ Ana Menü", callback_data="liste_menu")])
+        await query.edit_message_text(f"📊 **{d_map[query.data]} Şikayetler:**", reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
         
-        durum_map = {"liste_yeni": "Beklemede", "liste_inceleme": "İnceleniyor", "liste_cozuldu": "Çözüldü"}
-        durum = durum_map.get(query.data)
-        sikayetler = supabase.table("sikayetler").select("*").eq("durum", durum).execute().data
-        
-        keyboard = [[InlineKeyboardButton(f"{s['takip_kodu']} | {s['ad_soyad']}", callback_data=f"detay_{s['takip_kodu']}")] for s in sikayetler]
-        keyboard.append([InlineKeyboardButton("⬅️ Ana Menü", callback_data="liste_menu")])
-        
-        await query.edit_message_text(f"📊 **{durum} Şikayetler:**", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-
-    # 2. DETAY GÖRÜNTÜLEME (Takılan yer burası)
     elif query.data.startswith("detay_"):
         kod = query.data.split("_")[1]
         s = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute().data[0]
-        
-        text = f"📋 **Detay: {kod}**\n👤 {s['ad_soyad']} | 🏠 {s['daire_no']}\n📂 {s['kategori']}\n📝 {s['aciklama']}\n\nDurum: {s['durum']}"
-        kb = [
-            [InlineKeyboardButton("⏳ İncelemeye Al", callback_data=f"durum_inceleme_{kod}"), 
-             InlineKeyboardButton("✅ Çözüldü", callback_data=f"durum_cozuldu_{kod}")],
-            [InlineKeyboardButton("⬅️ Listeye Dön", callback_data="liste_yeni")]
-        ]
-        
-        # ÖNCE ESKİ MESAJI SİL, SONRA YENİSİNİ GÖNDER (Telegram'ın takılmaması için en garantisi)
+        text = f"📋 **{kod} Detay**\n👤 {s['ad_soyad']} | 🏠 {s['daire_no']} - {s['kat_blok']}\n📝 {s['aciklama']}\n🟢 {s['durum']}"
+        kb = [[InlineKeyboardButton("⏳ İncelemeye Al", callback_data=f"durum_inceleme_{kod}"), InlineKeyboardButton("✅ Çözüldü", callback_data=f"durum_cozuldu_{kod}")],
+              [InlineKeyboardButton("⬅️ Listeye Dön", callback_data="liste_menu")]]
         try: await query.message.delete()
         except: pass
+        if s.get('fotograf_url'): await context.bot.send_photo(chat_id=query.message.chat_id, photo=s['fotograf_url'], caption=text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+        else: await context.bot.send_message(chat_id=query.message.chat_id, text=text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
         
-        if s.get('fotograf_url'):
-            await context.bot.send_photo(chat_id=query.message.chat_id, photo=s['fotograf_url'], caption=text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-        else:
-            await context.bot.send_message(chat_id=query.message.chat_id, text=text, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-
-    # 3. DURUM GÜNCELLEME
     elif query.data.startswith("durum_"):
-        _, yeni_durum, kod = query.data.split("_")
-        durum_text = "İnceleniyor" if yeni_durum == "inceleme" else "Çözüldü"
+        _, yeni, kod = query.data.split("_")
+        durum_text = "İnceleniyor" if yeni == "inceleme" else "Çözüldü"
         supabase.table("sikayetler").update({"durum": durum_text}).eq("takip_kodu", kod).execute()
-        
-        # Sakine Bildirim
         s = supabase.table("sikayetler").select("sakin_id").eq("takip_kodu", kod).execute().data[0]
         await context.bot.send_message(chat_id=int(s['sakin_id']), text=f"🔔 Şikayetiniz ({kod}) durumu: **{durum_text}**.", parse_mode="Markdown")
-        
         await query.answer("✅ Güncellendi!")
-        # İşlem bitince listeye geri dön
-        await panel_komutu(update, context)
-# --- SAKİN TAKİP KOMUTU ---
+        await yonetici_panel(update, context)
+
+# --- TAKİP KOMUTU ---
 async def takip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("Lütfen kod girin. Örn: /takip #SB-1234")
-        return
-    kod = context.args[0]
-    res = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute()
-    if res.data:
-        s = res.data[0]
-        await update.message.reply_text(f"🔎 **Şikayet Durumu:**\nKod: {kod}\nDurum: {s['durum']}")
+    if not context.args: await update.message.reply_text("Kod girin: /takip #SB-XXXX")
     else:
-        await update.message.reply_text("❌ Kod bulunamadı.")
+        res = supabase.table("sikayetler").select("*").eq("takip_kodu", context.args[0]).execute()
+        if res.data: await update.message.reply_text(f"🔎 Durum: {res.data[0]['durum']}")
+        else: await update.message.reply_text("❌ Bulunamadı.")
 
-# --- ŞİKAYET İŞLEMLERİ ---
-def kategori_klavyesi():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛗 Asansör", callback_data="Asansör"), InlineKeyboardButton("🧹 Temizlik", callback_data="Temizlik")],
-        [InlineKeyboardButton("💡 Aydınlatma", callback_data="Aydınlatma"), InlineKeyboardButton("📦 Diğer", callback_data="Diğer")]
-    ])
-
-async def kategori_secimi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    context.user_data['kategori'] = query.data
-    await query.edit_message_text(f"📝 Seçilen: {query.data}. Lütfen detay yazın veya fotoğraf gönderin.")
-    return SIKAYET_DETAY
-
-async def handle_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.photo:
-        context.user_data['fotograf_url'] = await upload_photo_to_supabase(update.message.photo[-1].file_id, context)
-        await update.message.reply_text("📸 Fotoğraf alındı! Şikayet detayını yazın:")
-        return SIKAYET_DETAY
-    
-    aciklama, foto_url = update.message.text, context.user_data.get('fotograf_url')
-    sakin = supabase.table("sakinler").select("*").eq("telegram_id", str(update.message.chat_id)).execute().data[0]
-    kod = takip_kodu_uret()
-    
-    supabase.table("sikayetler").insert({
-        "sakin_id": int(sakin['telegram_id']), "ad_soyad": sakin['ad_soyad'], "daire_no": sakin['daire_no'],
-        "kat_blok": sakin.get('kat_blok', ''), "kategori": context.user_data['kategori'],
-        "aciklama": aciklama, "fotograf_url": foto_url, "takip_kodu": kod, "durum": "Beklemede"
-    }).execute()
-    
-    await update.message.reply_text(f"✅ Şikayetiniz alındı! Takip kodu: `{kod}`", parse_mode="Markdown")
-    msg = f"🔔 **Yeni Şikayet**\nKod: `{kod}`\nSakin: {sakin['ad_soyad']}\nDetay: {aciklama}"
-    if foto_url: await context.bot.send_photo(chat_id=YONETICI_ID, photo=foto_url, caption=msg, parse_mode="Markdown")
-    else: await context.bot.send_message(chat_id=YONETICI_ID, text=msg, parse_mode="Markdown")
-    return ConversationHandler.END
-
+# --- BAŞLATICI ---
 if __name__ == '__main__':
     threading.Thread(target=lambda: Flask(__name__).run(host="0.0.0.0", port=8080), daemon=True).start()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
@@ -178,7 +121,8 @@ if __name__ == '__main__':
                 KAT_BLOK:[MessageHandler(filters.TEXT, get_kat_blok)], SIKAYET_DETAY:[MessageHandler(filters.PHOTO | filters.TEXT, handle_sikayet_detay)]},
         fallbacks=[CommandHandler('start', start)])
     app.add_handler(conv)
-    app.add_handler(CommandHandler('panel', panel_komutu))
+    app.add_handler(CommandHandler('panel', yonetici_panel))
+    app.add_handler(CommandHandler('takip', takip))
     app.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansör|Aydınlatma|Temizlik|Diğer)$"))
-    app.add_handler(CallbackQueryHandler(panel_callback, pattern="^liste_"))
+    app.add_handler(CallbackQueryHandler(panel_callback))
     app.run_polling(drop_pending_updates=True)
