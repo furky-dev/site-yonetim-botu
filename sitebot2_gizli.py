@@ -130,7 +130,9 @@ async def handle_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # --- BAŞLATICI ---
 if __name__ == '__main__':
+    # Flask için thread başlat
     threading.Thread(target=lambda: Flask(__name__).run(host="0.0.0.0", port=8080), daemon=True).start()
+    
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
     conv_handler = ConversationHandler(
@@ -145,4 +147,6 @@ if __name__ == '__main__':
     )
     app.add_handler(conv_handler)
     app.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansör|Aydınlatma|Temizlik|Diğer)$"))
-    app.run_polling()
+    # En önemli değişiklik burası:
+    print("Bot başlatılıyor...")
+    app.run_polling(drop_pending_updates=True) # drop_pending_updates=True ekle!
