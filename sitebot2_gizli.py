@@ -25,17 +25,26 @@ def takip_kodu_uret():
     return f"#SB-{''.join(random.choices(string.digits, k=4))}"
 
 async def upload_photo_to_supabase(file_id, context):
-    file = await context.bot.get_file(file_id)
-    file_bytes = await file.download_as_bytearray()
-    file_name = f"sikayet_{file_id}.jpg"
-    
-    # Supabase'e yükle
-    supabase.storage.from_("sikayet-fotograflari").upload(
-        path=file_name, file=bytes(file_bytes), file_options={"content-type": "image/jpeg"}
-    )
-    # Public URL al
-    url_res = supabase.storage.from_("sikayet-fotograflari").get_public_url(file_name)
-    return url_res
+    try:
+        file = await context.bot.get_file(file_id)
+        # Bytes olarak indir
+        file_bytes = await file.download_as_bytearray()
+        file_name = f"sikayet_{file_id}.jpg"
+        
+        # Supabase'e yükle (file_options kısmını sadeleştirdik)
+        # Bucket adının "sikayet-fotograflari" olduğundan %100 emin ol
+        res = supabase.storage.from_("sikayet-fotograflari").upload(
+            path=file_name, 
+            file=bytes(file_bytes),
+            file_options={"content-type": "image/jpeg"}
+        )
+        
+        # URL al
+        url_res = supabase.storage.from_("sikayet-fotograflari").get_public_url(file_name)
+        return url_res
+    except Exception as e:
+        print(f"SUPABASE YÜKLEME HATASI: {e}")
+        return None # Hata durumunda None dön ki kod patlamasın
 
 # --- 3. BOT FONKSİYONLARI ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
