@@ -137,11 +137,25 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await yonetici_panel(update, context)
 
 async def takip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: await update.message.reply_text("Kod girin: /takip #SB-XXXX")
+    if not context.args: 
+        await update.message.reply_text("🔎 Şikayet durumunu sorgulamak için lütfen kodunuzu girin.\nÖrnek: `/takip #SB-1234`")
     else:
-        res = supabase.table("sikayetler").select("*").eq("takip_kodu", context.args[0]).execute()
-        if res.data: await update.message.reply_text(f"🔎 Durum: {res.data[0]['durum']}")
-        else: await update.message.reply_text("❌ Kod geçersiz.")
+        kod = context.args[0]
+        res = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute()
+        
+        if res.data:
+            s = res.data[0]
+            durum_emoji = "🟢" if s['durum'] == "Çözüldü" else "⏳" if s['durum'] == "İnceleniyor" else "🆕"
+            await update.message.reply_text(
+                f"📋 **Şikayet Detayı**\n"
+                f"Kod: `{s['takip_kodu']}`\n"
+                f"Kategori: {s['kategori']}\n"
+                f"Durum: {durum_emoji} {s['durum']}\n"
+                f"Detay: {s['aciklama']}", 
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("❌ Girdiğiniz `#SB-XXXX` kodu ile eşleşen bir şikayet bulunamadı. Lütfen kodu kontrol edip tekrar deneyin.")
 
 # --- BAŞLATICI ---
 if __name__ == '__main__':
