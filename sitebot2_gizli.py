@@ -70,8 +70,8 @@ async def get_daire(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def kategori_klavyesi():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("Asansör", callback_data="Asansör"), InlineKeyboardButton("Temizlik", callback_data="Temizlik")],
-        [InlineKeyboardButton("Aydınlatma", callback_data="Aydınlatma"), InlineKeyboardButton("Diğer", callback_data="Diğer")]
+        [InlineKeyboardButton("🛗 Asansör", callback_data="Asansör"), InlineKeyboardButton("🧹 Temizlik", callback_data="Temizlik")],
+        [InlineKeyboardButton("💡 Aydınlatma", callback_data="Aydınlatma"), InlineKeyboardButton("📦 Diğer", callback_data="Diğer")]
     ])
 
 async def kategori_secimi(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -112,7 +112,13 @@ async def handle_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYP
     await update.message.reply_text(f"Şikayetiniz alındı! Takip kodunuz: {kod}")
     
     # Yöneticiye Bildirim
-    msg = f"🔔 Yeni Şikayet!\nKod: {kod}\nSakin: {sakin['ad_soyad']}\nDetay: {aciklama}"
+    # Yöneticiye Bildirim (İkonlu Şık Versiyon)
+    msg = (f"🔔 **YENİ ŞİKAYET KAYDI**\n\n"
+           f"🆔 **Takip Kodu:** `{kod}`\n"
+           f"👤 **Sakin:** {sakin['ad_soyad']}\n"
+           f"🏠 **Daire:** {sakin['daire_no']}\n"
+           f"📂 **Kategori:** {kategori}\n"
+           f"📝 **Açıklama:** {aciklama}")
     if foto_url:
         await context.bot.send_photo(chat_id=YONETICI_ID, photo=foto_url, caption=msg)
     else:
