@@ -93,32 +93,49 @@ async def handle_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYP
     return ConversationHandler.END
 
 # --- YÖNETİCİ PANELİ ---
-async def yonetici_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    yeni = supabase.table("sikayetler").select("*", count='exact').eq("durum", "Beklemede").execute().count
-    inceleme = supabase.table("sikayetler").select("*", count='exact').eq("durum", "İnceleniyor").execute().count
-    kb = [[InlineKeyboardButton(f"🆕 Yeni ({yeni})", callback_data="liste_yeni"), InlineKeyboardButton(f"⏳ İnceleniyor ({inceleme})", callback_data="liste_inceleme")]]
-    if update.callback_query: await update.callback_query.edit_message_text("⚙️ Yönetici Paneli:", reply_markup=InlineKeyboardMarkup(kb))
-    else: await update.message.reply_text("⚙️ Yönetici Paneli:", reply_markup=InlineKeyboardMarkup(kb))
-
 async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
+    # 1. BUTON: LİSTEYE DÖN (Düzeltildi)
+    if query.data == "liste_yeni":
+        # Manuel olarak listeyi tekrar tetikliyoruz
+        # Liste fonksiyonunu doğrudan çağırmak yerine callback verisini simüle ediyoruz
+        # Ancak en garantisi fonksiyonun kendisini çağırmak:
+        return await yonetici_panel(update, context)
+
+    # 2. LİSTELERİ GÖRÜNTÜLEME
     if query.data.startswith("liste_"):
         if query.data == "liste_menu": return await yonetici_panel(update, context)
+        
         d_map = {"liste_yeni": "Beklemede", "liste_inceleme": "İnceleniyor"}
-        items = supabase.table("sikayetler").select("*").eq("durum", d_map[query.data]).execute().data
+        durum = d_map.get(query.data)
+        items = supabase.table("sikayetler").select("*").eq("durum", durum).execute().data
+        
         kb = [[InlineKeyboardButton(f"{s['takip_kodu']} | {s['ad_soyad']}", callback_data=f"detay_{s['takip_kodu']}")] for s in items]
         kb.append([InlineKeyboardButton("⬅️ Ana Menü", callback_data="liste_menu")])
-        await query.edit_message_text(f"📊 {d_map[query.data]} Şikayetler:", reply_markup=InlineKeyboardMarkup(kb))
+        
+        await query.edit_message_text(f"📊 {durum} Şikayetler:", reply_markup=InlineKeyboardMarkup(kb))
+
+    # 3. DETAYLAR
     elif query.data.startswith("detay_"):
         kod = query.data.split("_")[1]
         s = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute().data[0]
         txt = f"📋 **{kod}**\n👤 {s['ad_soyad']}\n🏠 {s['daire_no']}\n📝 {s['aciklama']}\n🟢 {s['durum']}"
-        kb = [[InlineKeyboardButton("⏳ İncelemeye Al", callback_data=f"durum_inceleme_{kod}"), InlineKeyboardButton("✅ Çözüldü", callback_data=f"durum_cozuldu_{kod}")], [InlineKeyboardButton("⬅️ Listeye Dön", callback_data="liste_yeni")]]
+        # BURADAKİ BUTONDA 'liste_yeni' VERİSİ GİDİYOR
+        kb = [[InlineKeyboardButton("⏳ İncelemeye Al", callback_data=f"durum_inceleme_{kod}"), 
+               InlineKeyboardButton("✅ Çözüldü", callback_data=f"durum_cozuldu_{kod}")], 
+              [InlineKeyboardButton("⬅️ Listeye Dön", callback_data="liste_yeni")]]
+        
         try: await query.message.delete()
         except: pass
-        if s.get('fotograf_url'): await context.bot.send_photo(query.message.chat_id, s['fotograf_url'], caption=txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-        else: await context.bot.send_message(query.message.chat_id, txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+        
+        if s.get('fotograf_url'): 
+            await context.bot.send_photo(query.message.chat_id, s['fotograf_url'], caption=txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+        else: 
+            await context.bot.send_message(query.message.chat_id, txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
+
+    # 4. DURUM GÜNCELLEME
     elif query.data.startswith("durum_"):
         _, yeni, kod = query.data.split("_")
         d = "İnceleniyor" if yeni == "inceleme" else "Çözüldü"
