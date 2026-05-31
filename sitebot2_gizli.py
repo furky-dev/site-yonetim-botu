@@ -723,8 +723,8 @@ if __name__ == '__main__':
         fallbacks=[]
     ))
 
-    app.add_handler(CallbackQueryHandler(kategori_secimi, pattern=\"^(Asansör|Aydınlatma|Temizlik|Gürültü|Diğer)$\"))
-    app.add_handler(CallbackQueryHandler(buton_islem, pattern=\"^(liste_|yonet_|durum_|panele_don)\"))
+    app.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansör|Aydınlatma|Temizlik|Gürültü|Diğer)$"))
+    app.add_handler(CallbackQueryHandler(buton_islem, pattern="^(liste_|yonet_|durum_|panele_don)"))
     
     # 📸 Fotoğraflı şikayetleri yakalayan handler (Metin handler'ının hemen üstüne eklendi)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_complaint))
