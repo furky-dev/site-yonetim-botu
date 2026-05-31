@@ -603,4 +603,4 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, sikayet_kaydet))
 
     print("🤖 Telegram botu başlatıldı.")
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
