@@ -90,38 +90,41 @@ async def kategori_secimi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(f"Seçilen: {query.data}. Lütfen bir fotoğraf gönderin veya şikayetinizi yazın.")
     return SIKAYET_DETAY
 
+# --- ŞİKAYET EKLEME FONKSİYONU ---
 async def handle_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Fotoğraf kontrolü
     if update.message.photo:
         url = await upload_photo_to_supabase(update.message.photo[-1].file_id, context)
-        context.user_data['fotograf_url'] = url
-        await update.message.reply_text("Fotoğraf alındı! Şimdi şikayet detayınızı yazın.")
+        if url:
+            context.user_data['fotograf_url'] = url
+            await update.message.reply_text("Fotoğraf başarıyla yüklendi! Şimdi şikayet detayınızı yazın.")
+        else:
+            await update.message.reply_text("Fotoğraf yüklenemedi, yine de devam edebilirsiniz.")
         return SIKAYET_DETAY
     
-    # Şikayeti tamamlama
+    # Metin geldiğinde şikayeti bitir
     aciklama = update.message.text
-    kategori = context.user_data.get('kategori')
+    kategori = context.user_data.get('kategori', 'Diğer')
     foto_url = context.user_data.get('fotograf_url')
-    sakin = supabase.table("sakinler").select("*").eq("telegram_id", str(update.message.chat_id)).execute().data[0]
     
-    kod = takip_kodu_uret()
+    # Kullanıcıyı bul
+    res = supabase.table("sakinler").select("*").eq("telegram_id", str(update.message.chat_id)).execute()
+    sakin = res.data[0]
+    
+    # VERİTABANI İNSERT (bigint hatasını engellemek için int dönüşümü!)
     supabase.table("sikayetler").insert({
-        "sakin_id": sakin['id'],
+        "sakin_id": int(sakin['telegram_id']),  # <--- Burası int olmalı
         "ad_soyad": sakin['ad_soyad'],
         "daire_no": sakin['daire_no'],
+        "kat_blok": sakin.get('kat_blok', ''),
         "kategori": kategori,
         "aciklama": aciklama,
         "fotograf_url": foto_url,
-        "takip_kodu": kod
+        "takip_kodu": takip_kodu_uret(),
+        "durum": "Beklemede"
     }).execute()
     
-    await update.message.reply_text(f"Şikayetiniz alındı! Takip kodunuz: {kod}")
-    
-    # Yöneticiye Bildirim
-    msg = f"🔔 Yeni Şikayet!\nKod: {kod}\nSakin: {sakin['ad_soyad']}\nKategori: {kategori}\nDetay: {aciklama}"
-    if foto_url:
-        await context.bot.send_photo(chat_id=YONETICI_ID, photo=foto_url, caption=msg)
-    else:
-        await context.bot.send_message(chat_id=YONETICI_ID, text=msg)
+    await update.message.reply_text("Şikayetiniz oluşturuldu!")
     return ConversationHandler.END
 
 # --- WEB FORMU ---
