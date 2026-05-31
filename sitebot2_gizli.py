@@ -4,7 +4,7 @@ import string
 import os
 import threading
 import requests
-import io  # <-- Fotoğrafları RAM'de işlemek için eklendi
+import io
 from flask import Flask, request, jsonify, render_template_string
 from supabase import create_client, Client
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -38,7 +38,7 @@ HTML_FORM = """
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Bina Şikayet Formu</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;50&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg: #0f0f13;
@@ -365,7 +365,6 @@ def sikayet_ekle():
     kod = takip_kodu_uret()
     
     try:
-        # Supabase'e kaydet
         res = supabase.table("sikayetler").insert({
             "kod": kod,
             "ad_soyad": data.get("ad_soyad"),
@@ -376,7 +375,6 @@ def sikayet_ekle():
             "kaynak": "Web Formu"
         }).execute()
         
-        # Yöneticiye Telegram'dan Bildir
         if YONETICI_ID:
             msg = (
                 f"🌐 *Web Formundan Yeni Şikayet!*\n\n"
@@ -403,7 +401,6 @@ def flask_calistir():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     
-    # Kullanıcı kayıtlı mı kontrol et
     res = supabase.table("sakinler").select("*").eq("sakin_id", chat_id).execute()
     
     if res.data:
@@ -428,7 +425,6 @@ async def get_daire(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ad_soyad = context.user_data['ad_soyad']
     daire_no = update.message.text
 
-    # Sakini kaydet
     supabase.table("sakinler").insert({
         "sakin_id": chat_id,
         "ad_soyad": ad_soyad,
@@ -463,17 +459,14 @@ async def kategori_secimi(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# --- FOTOĞRAFLI ŞİKAYETLERİ YAKALAYIP STORAGE'A YÜKLEYEN YENİ FONKSİYON ---
 async def handle_photo_complaint(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     user_data = context.user_data
 
-    # Kullanıcı daha önce kategori seçti mi kontrol et
     if 'secilen_kategori' not in user_data:
         await update.message.reply_text("Lütfen önce /start komutu ile bir şikayet kategorisi seçiniz.")
         return
 
-    # Sakin bilgilerini çek
     res_sakin = supabase.table("sakinler").select("*").eq("sakin_id", chat_id).execute()
     if not res_sakin.data:
         await update.message.reply_text("Lütfen önce /start yazarak kayıt işlemlerinizi tamamlayınız.")
@@ -483,46 +476,38 @@ async def handle_photo_complaint(update: Update, context: ContextTypes.DEFAULT_T
     kategori = user_data['secilen_kategori']
     kod = takip_kodu_uret()
 
-    # Bilgilendirme mesajı
     await update.message.reply_text("🔄 Fotoğrafınız alınıyor ve şikayet kaydınız oluşturuluyor, lütfen bekleyin...")
 
     try:
-        # En kaliteli fotoğrafı yakala
         photo_file = await update.message.photo[-1].get_file()
         
-        # Dosyayı RAM hafızasına indir
         photo_bytes = io.BytesIO()
         await photo_file.download_to_memory(out=photo_bytes)
         photo_bytes.seek(0)
         
-        # Benzersiz dosya adı üretimi
         file_name = f"{chat_id}_{update.message.message_id}.jpg"
         bucket_name = "sikayet-fotograflari"
         
-        # 1. Fotoğrafı Supabase Storage'a yükle
         supabase.storage.from_(bucket_name).upload(
             path=file_name,
             file=photo_bytes.getvalue(),
             file_options={"content-type": "image/jpeg"}
         )
         
-        # 2. Public URL adresini al
         photo_url = supabase.storage.from_(bucket_name).get_public_url(file_name)
         
-        # 3. Veritabanına şikayeti fotograf_url sütunu ile birlikte kaydet
         supabase.table("sikayetler").insert({
             "kod": kod,
             "sakin_id": chat_id,
             "ad_soyad": sakin['ad_soyad'],
             "daire_no": sakin['daire_no'],
             "kategori": kategori,
-            "detay": "Fotoğraflı şikayet bildirimi (Ekli görseli inceleyiniz).",
+            "detay": "Fotoğraflı şikayet bildirim şablonu (Ekli görseli inceleyiniz).",
             "durum": "Beklemede",
             "kaynak": "Telegram (Fotoğraf)",
-            "fotograf_url": photo_url  # Eğer tablonuzda bu sütun yoksa Supabase panelinden ekleyebilirsiniz
+            "fotograf_url": photo_url
         }).execute()
         
-        # 4. Yöneticiye anlık FOTOĞRAFLI bildirim gönder
         if YONETICI_ID:
             bildirim_metni = (
                 f"🚨 *Telegram'dan Yeni Fotoğraflı Şikayet!*\n\n"
@@ -538,7 +523,6 @@ async def handle_photo_complaint(update: Update, context: ContextTypes.DEFAULT_T
                 parse_mode="Markdown"
             )
 
-        # Temizlik
         del user_data['secilen_kategori']
         await update.message.reply_text(
             f"✅ Şikayetiniz fotoğraflı olarak başarıyla alınmış ve yöneticiye iletilmiştir!\n\n"
@@ -550,7 +534,6 @@ async def handle_photo_complaint(update: Update, context: ContextTypes.DEFAULT_T
         print(f"Fotoğraf Yükleme Hatası: {e}")
         await update.message.reply_text("❌ Şikayetiniz kaydedilirken veya fotoğraf yüklenirken teknik bir sorun oluştu.")
 
-# --- METİN TABANLI ŞİKAYETLERİ İŞLEYEN MEVCUT FONKSİYON ---
 async def handle_complaint_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     user_data = context.user_data
@@ -640,7 +623,7 @@ async def buton_islem(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         text = f"📂 *{durum_tr} Şikayetler Listesi*:\n\n"
         keyboard = []
-        for s in res.data[:5]:  # İlk 5 şikayeti göster
+        for s in res.data[:5]:
             text += f"🔑 *{s['kod']}* - {s['ad_soyad']} ({s['daire_no']})\n📌 {s['kategori']}: {s['detay'][:40]}...\n\n"
             keyboard.append([InlineKeyboardButton(f"Yönet: {s['kod']}", callback_data=f"yonet_{s['kod']}")])
         
@@ -661,7 +644,6 @@ async def buton_islem(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"🔗 *Kaynak:* {s['kaynak']}"
             )
             
-            # Eğer fotoğraflı şikayet ise detay metnine link ekleyelim
             if s.get('fotograf_url'):
                 text += f"\n📸 *Şikayet Fotoğrafı:* [Tıkla ve Gör]({s['fotograf_url']})"
 
@@ -675,16 +657,12 @@ async def buton_islem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("durum_"):
         _, kod, yeni_durum = data.split("_")
         
-        # Önce eski şikayet verisini sakin id'sini almak için çekelim
         eski_res = supabase.table("sikayetler").select("sakin_id").eq("kod", kod).execute()
-        
-        # Güncelleme yap
         supabase.table("sikayetler").update({"durum": yeni_durum}).eq("kod", kod).execute()
         
         keyboard = [[InlineKeyboardButton("« Panele Dön", callback_data="panele_don")]]
         await query.edit_message_text(f"✅ *{kod}* kodlu şikayetin durumu *{yeni_durum}* olarak güncellendi.", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-        # Sakine Telegram üzerinden durum güncelleme mesajı gönder
         if eski_res.data and eski_res.data[0].get("sakin_id"):
             sakin_id = eski_res.data[0]["sakin_id"]
             if sakin_id:
@@ -702,15 +680,14 @@ async def buton_islem(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ============================================================
-# --- ANA BAŞLATICI ---\n# ============================================================
+# --- ANA BAŞLATICI ---
+# ============================================================
 
 if __name__ == '__main__':
-    # Flask'ı ayrı thread'de başlat
     t = threading.Thread(target=flask_calistir, daemon=True)
     t.start()
     print("✅ Web formu başlatıldı.")
 
-    # Telegram botunu ana thread'de çalıştır
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
     app.add_handler(CommandHandler('panel', panel))
@@ -726,10 +703,7 @@ if __name__ == '__main__':
     app.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansör|Aydınlatma|Temizlik|Gürültü|Diğer)$"))
     app.add_handler(CallbackQueryHandler(buton_islem, pattern="^(liste_|yonet_|durum_|panele_don)"))
     
-    # 📸 Fotoğraflı şikayetleri yakalayan handler (Metin handler'ının hemen üstüne eklendi)
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo_complaint))
-    
-    # Mevcut metin dinleyici handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_complaint_text))
 
     print("🚀 Telegram botu aktif!")
