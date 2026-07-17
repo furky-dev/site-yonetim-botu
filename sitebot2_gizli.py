@@ -1,5 +1,5 @@
-import logging, random, string, os, threading
-from flask import Flask
+import logging, random, string, os, threading, asyncio
+from flask import Flask, request
 from supabase import create_client, Client
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -158,18 +158,47 @@ async def takip(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ Girdiğiniz `#SB-XXXX` kodu ile eşleşen bir şikayet bulunamadı. Lütfen kodu kontrol edip tekrar deneyin.")
 
 # --- BAŞLATICI ---
+flask_app = Flask(__name__)
+
+application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+conv = ConversationHandler(entry_points=[CommandHandler('start', start)],
+    states={AD:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_ad)], DAIRE:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_daire)],
+            KAT_BLOK:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_kat_blok)], SIKAYET_DETAY:[MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_sikayet_detay)]},
+    fallbacks=[CommandHandler('start', start)])
+
+application.add_handler(conv)
+application.add_handler(CommandHandler('panel', yonetici_panel))
+application.add_handler(CommandHandler('takip', takip))
+application.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansör|Aydınlatma|Temizlik|Diğer)$"))
+application.add_handler(CallbackQueryHandler(panel_callback))
+
+bot_loop = asyncio.new_event_loop()
+
+def bot_motoru_baslat():
+    asyncio.set_event_loop(bot_loop)
+    bot_loop.run_until_complete(application.initialize())
+
+    dis_url = os.getenv("RENDER_EXTERNAL_URL")
+    if dis_url:
+        webhook_url = f"{dis_url}/webhook"
+        bot_loop.run_until_complete(application.bot.set_webhook(url=webhook_url))
+        print(f"✅ Webhook ayarlandı: {webhook_url}")
+    else:
+        print("⚠️ RENDER_EXTERNAL_URL bulunamadı — webhook otomatik ayarlanamadı.")
+
+    bot_loop.run_forever()
+
+@flask_app.route("/webhook", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    asyncio.run_coroutine_threadsafe(application.process_update(update), bot_loop)
+    return "OK", 200
+
 if __name__ == '__main__':
-    threading.Thread(target=lambda: Flask(__name__).run(host="0.0.0.0", port=8080), daemon=True).start()
-    app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    
-    conv = ConversationHandler(entry_points=[CommandHandler('start', start)], 
-        states={AD:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_ad)], DAIRE:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_daire)], 
-                KAT_BLOK:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_kat_blok)], SIKAYET_DETAY:[MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_sikayet_detay)]},
-        fallbacks=[CommandHandler('start', start)])
-    
-    app.add_handler(conv)
-    app.add_handler(CommandHandler('panel', yonetici_panel))
-    app.add_handler(CommandHandler('takip', takip))
-    app.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansör|Aydınlatma|Temizlik|Diğer)$"))
-    app.add_handler(CallbackQueryHandler(panel_callback))
-    app.run_polling(drop_pending_updates=True)
+    t = threading.Thread(target=bot_motoru_baslat, daemon=True)
+    t.start()
+    print("🤖 Telegram bot motoru (webhook modu) başlatıldı.")
+
+    port = int(os.getenv("PORT", 8080))
+    flask_app.run(host="0.0.0.0", port=port)
