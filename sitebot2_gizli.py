@@ -1,5 +1,5 @@
-import logging, random, string, os, threading, asyncio
-from flask import Flask, request
+import logging, random, string, os, threading, asyncio, uuid
+from flask import Flask, request, jsonify, render_template_string
 from supabase import create_client, Client
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -33,6 +33,303 @@ async def upload_photo_to_supabase(file_id, context):
         supabase.storage.from_("sikayet-fotograflari").upload(path=file_name, file=bytes(file_bytes), file_options={"content-type": "image/jpeg"})
         return supabase.storage.from_("sikayet-fotograflari").get_public_url(file_name)
     except: return None
+
+def upload_web_photo_to_supabase(file_storage):
+    try:
+        file_bytes = file_storage.read()
+        file_name = f"web_{uuid.uuid4().hex}.jpg"
+        supabase.storage.from_("sikayet-fotograflari").upload(
+            path=file_name, file=file_bytes,
+            file_options={"content-type": file_storage.content_type or "image/jpeg"}
+        )
+        return supabase.storage.from_("sikayet-fotograflari").get_public_url(file_name)
+    except Exception:
+        return None
+
+# --- WEB ŞİKAYET FORMU ---
+HTML_FORM = """
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Şikayet Formu</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #f2f4f7;
+    color: #1a1a1a;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 20px;
+    line-height: 1.5;
+    padding: 20px;
+    overflow-x: hidden;
+  }
+  .card {
+    background: #ffffff;
+    max-width: 560px;
+    margin: 0 auto;
+    border-radius: 16px;
+    padding: 28px 24px 36px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+  }
+  h1 {
+    font-size: 30px;
+    margin: 0 0 6px;
+    color: #08326b;
+  }
+  .subtitle {
+    font-size: 19px;
+    color: #333;
+    margin: 0 0 28px;
+  }
+  label {
+    display: block;
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: #111;
+  }
+  .field { margin-bottom: 24px; }
+  .opsiyonel {
+    font-weight: 400;
+    font-size: 16px;
+    color: #555;
+  }
+  input[type="text"], textarea {
+    width: 100%;
+    font-size: 20px;
+    font-family: inherit;
+    padding: 16px;
+    border: 2px solid #999;
+    border-radius: 10px;
+    color: #111;
+    background: #fff;
+  }
+  input[type="text"]:focus, textarea:focus {
+    outline: 3px solid #08519c;
+    border-color: #08519c;
+  }
+  textarea { min-height: 130px; resize: vertical; }
+  .kategori-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 12px;
+  }
+  .kategori-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 64px;
+    font-size: 19px;
+    font-weight: 700;
+    border: 3px solid #999;
+    border-radius: 12px;
+    background: #fff;
+    color: #111;
+    cursor: pointer;
+    padding: 8px;
+    text-align: center;
+  }
+  .kategori-btn.secili {
+    border-color: #08519c;
+    background: #08519c;
+    color: #fff;
+  }
+  .foto-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 64px;
+    font-size: 19px;
+    font-weight: 700;
+    border: 3px dashed #999;
+    border-radius: 12px;
+    background: #fafafa;
+    color: #333;
+    cursor: pointer;
+  }
+  .foto-durum { margin-top: 10px; font-size: 17px; color: #08326b; font-weight: 600; }
+  .gonder-btn {
+    width: 100%;
+    min-height: 68px;
+    font-size: 23px;
+    font-weight: 700;
+    border: none;
+    border-radius: 12px;
+    background: #08519c;
+    color: #fff;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  .gonder-btn:disabled { background: #9bb6d3; cursor: not-allowed; }
+  .hata {
+    display: none;
+    background: #fdecec;
+    border: 2px solid #c81e1e;
+    color: #8a1414;
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 22px;
+  }
+  .basarili { display: none; text-align: center; }
+  .basarili .tik { font-size: 60px; margin-bottom: 10px; }
+  .basarili h2 { font-size: 26px; color: #08326b; margin: 0 0 14px; }
+  .kod-kutu {
+    display: inline-block;
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    background: #eaf1fb;
+    border: 3px solid #08519c;
+    color: #08326b;
+    border-radius: 12px;
+    padding: 14px 26px;
+    margin: 10px 0 20px;
+  }
+  .basarili p { font-size: 19px; color: #333; margin-bottom: 26px; }
+  .yeni-btn {
+    width: 100%;
+    min-height: 60px;
+    font-size: 19px;
+    font-weight: 700;
+    border: 2px solid #08519c;
+    border-radius: 12px;
+    background: #fff;
+    color: #08519c;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <div id="formGorunumu">
+    <h1>🏢 Şikayet Bildir</h1>
+    <p class="subtitle">Aşağıdaki alanları doldurup en alttaki büyük butona basın.</p>
+
+    <div class="hata" id="hataMesaji"></div>
+
+    <form id="sikayetForm">
+      <div class="field">
+        <label for="ad_soyad">Ad Soyad</label>
+        <input type="text" id="ad_soyad" name="ad_soyad" required>
+      </div>
+
+      <div class="field">
+        <label for="daire_no">Daire No</label>
+        <input type="text" id="daire_no" name="daire_no" required>
+      </div>
+
+      <div class="field">
+        <label for="kat_blok">Kat / Blok <span class="opsiyonel">(isteğe bağlı)</span></label>
+        <input type="text" id="kat_blok" name="kat_blok">
+      </div>
+
+      <div class="field">
+        <label>Konu</label>
+        <input type="hidden" id="kategori" name="kategori">
+        <div class="kategori-grid" id="kategoriGrid">
+          <button type="button" class="kategori-btn" data-deger="Asansör">🛗 Asansör</button>
+          <button type="button" class="kategori-btn" data-deger="Aydınlatma">💡 Aydınlatma</button>
+          <button type="button" class="kategori-btn" data-deger="Temizlik">🧹 Temizlik</button>
+          <button type="button" class="kategori-btn" data-deger="Diğer">📦 Diğer</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="aciklama">Şikayet Detayı</label>
+        <textarea id="aciklama" name="aciklama" required></textarea>
+      </div>
+
+      <div class="field">
+        <label>Fotoğraf <span class="opsiyonel">(isteğe bağlı)</span></label>
+        <label class="foto-btn" for="fotograf">📷 Fotoğraf Ekle</label>
+        <input type="file" id="fotograf" name="fotograf" accept="image/*" style="display:none">
+        <div class="foto-durum" id="fotoDurum"></div>
+      </div>
+
+      <button type="submit" class="gonder-btn" id="gonderBtn">ŞİKAYETİ GÖNDER</button>
+    </form>
+  </div>
+
+  <div class="basarili" id="basariGorunumu">
+    <div class="tik">✅</div>
+    <h2>Şikayetiniz Alındı</h2>
+    <div class="kod-kutu" id="takipKodu"></div>
+    <p>Bu kodu not edin. Durumu Telegram üzerinden<br><b>/takip</b> komutuyla sorgulayabilirsiniz.</p>
+    <button type="button" class="yeni-btn" onclick="location.reload()">Yeni Şikayet Bildir</button>
+  </div>
+
+</div>
+
+<script>
+document.querySelectorAll('.kategori-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.kategori-btn').forEach(b => b.classList.remove('secili'));
+    btn.classList.add('secili');
+    document.getElementById('kategori').value = btn.dataset.deger;
+  });
+});
+
+document.getElementById('fotograf').addEventListener('change', (e) => {
+  const dosya = e.target.files[0];
+  document.getElementById('fotoDurum').textContent = dosya ? ('Seçilen dosya: ' + dosya.name) : '';
+});
+
+document.getElementById('sikayetForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const hataEl = document.getElementById('hataMesaji');
+  const btn = document.getElementById('gonderBtn');
+  hataEl.style.display = 'none';
+
+  const adSoyad = document.getElementById('ad_soyad').value.trim();
+  const daireNo = document.getElementById('daire_no').value.trim();
+  const kategori = document.getElementById('kategori').value;
+  const aciklama = document.getElementById('aciklama').value.trim();
+
+  if (!adSoyad || !daireNo || !kategori || !aciklama) {
+    hataEl.textContent = 'Lütfen Ad Soyad, Daire No, Konu ve Şikayet Detayı alanlarını doldurun.';
+    hataEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Gönderiliyor...';
+
+  const veri = new FormData(document.getElementById('sikayetForm'));
+
+  try {
+    const res = await fetch('/sikayet', { method: 'POST', body: veri });
+    const sonuc = await res.json();
+    if (sonuc.success) {
+      document.getElementById('formGorunumu').style.display = 'none';
+      document.getElementById('takipKodu').textContent = sonuc.takip_kodu;
+      document.getElementById('basariGorunumu').style.display = 'block';
+    } else {
+      hataEl.textContent = sonuc.error || 'Bir hata oluştu, lütfen tekrar deneyin.';
+      hataEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'ŞİKAYETİ GÖNDER';
+    }
+  } catch (err) {
+    hataEl.textContent = 'Bağlantı hatası. İnternetinizi kontrol edip tekrar deneyin.';
+    hataEl.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'ŞİKAYETİ GÖNDER';
+  }
+});
+</script>
+</body>
+</html>
+"""
 
 # --- CONVERSATION FONKSİYONLARI ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -174,6 +471,47 @@ application.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansö
 application.add_handler(CallbackQueryHandler(panel_callback))
 
 bot_loop = asyncio.new_event_loop()
+flask_app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # foto yüklemede 5MB üst sınır
+
+async def _web_sikayet_bildir(kod, ad_soyad, daire_no, aciklama, foto_url):
+    msg = f"🔔 **Yeni Şikayet (Web)**\nKod: `{kod}`\nSakin: {ad_soyad}\nDaire: {daire_no}\nDetay: {aciklama}"
+    if foto_url:
+        await application.bot.send_photo(chat_id=YONETICI_ID, photo=foto_url, caption=msg, parse_mode="Markdown")
+    else:
+        await application.bot.send_message(chat_id=YONETICI_ID, text=msg, parse_mode="Markdown")
+
+@flask_app.route("/")
+def index():
+    return render_template_string(HTML_FORM)
+
+@flask_app.route("/sikayet", methods=["POST"])
+def sikayet_al():
+    ad_soyad = request.form.get("ad_soyad", "").strip()
+    daire_no = request.form.get("daire_no", "").strip()
+    kat_blok = request.form.get("kat_blok", "").strip()
+    kategori = request.form.get("kategori", "").strip()
+    aciklama = request.form.get("aciklama", "").strip()
+    foto = request.files.get("fotograf")
+
+    if not ad_soyad or not daire_no or not kategori or not aciklama:
+        return jsonify({"success": False, "error": "Lütfen zorunlu alanları doldurun."}), 400
+
+    foto_url = None
+    if foto and foto.filename:
+        foto_url = upload_web_photo_to_supabase(foto)
+
+    kod = takip_kodu_uret()
+    supabase.table("sikayetler").insert({
+        "ad_soyad": ad_soyad, "daire_no": daire_no, "kat_blok": kat_blok,
+        "kategori": kategori, "aciklama": aciklama, "fotograf_url": foto_url,
+        "takip_kodu": kod, "durum": "Beklemede"
+    }).execute()
+
+    asyncio.run_coroutine_threadsafe(
+        _web_sikayet_bildir(kod, ad_soyad, daire_no, aciklama, foto_url), bot_loop
+    )
+
+    return jsonify({"success": True, "takip_kodu": kod})
 
 def bot_motoru_baslat():
     asyncio.set_event_loop(bot_loop)
