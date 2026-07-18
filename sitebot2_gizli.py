@@ -2,7 +2,7 @@ import logging, random, string, os, threading, asyncio, uuid
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template_string
 from supabase import create_client, Client
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, BotCommand, BotCommandScopeChat
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, filters,
     ContextTypes, CallbackQueryHandler, ConversationHandler
@@ -660,13 +660,13 @@ async def sikayetlerim(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     res = supabase.table("sikayetler").select("*").eq("sakin_id", int(chat_id)).order("id", desc=True).limit(10).execute()
     if not res.data:
-        await update.message.reply_text("Henüz bir şikayetiniz bulunmuyor.")
+        await update.message.reply_text("Henüz bir şikayetiniz bulunmuyor.", reply_markup=ana_menu_klavyesi())
         return
     satirlar = []
     for s in res.data:
         emoji = "🟢" if s['durum'] == "Çözüldü" else "⏳" if s['durum'] == "İnceleniyor" else "🆕"
         satirlar.append(f"{emoji} `{s['takip_kodu']}` — {s['kategori']}\nDurum: {s['durum']}\nDetay: {s['aciklama']}")
-    await update.message.reply_text("📋 *Şikayetleriniz:*\n\n" + "\n\n".join(satirlar), parse_mode="Markdown")
+    await update.message.reply_text("📋 *Şikayetleriniz:*\n\n" + "\n\n".join(satirlar), parse_mode="Markdown", reply_markup=ana_menu_klavyesi())
 
 async def kategori_secimi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -690,7 +690,10 @@ async def sikayeti_kaydet_ve_bildir(chat_id, context: ContextTypes.DEFAULT_TYPE,
         "aciklama": aciklama, "fotograf_url": foto_url, "takip_kodu": kod, "durum": "Beklemede",
         "kvkk_onay": sakin.get('kvkk_onay', True), "kvkk_onay_tarihi": sakin.get('kvkk_onay_tarihi')
     }).execute()
-    await context.bot.send_message(chat_id, f"✅ Şikayetiniz alındı! Takip kodu: `{kod}`", parse_mode="Markdown")
+    await context.bot.send_message(
+        chat_id, f"✅ Şikayetiniz alındı! Takip kodu: `{kod}`",
+        parse_mode="Markdown", reply_markup=ana_menu_klavyesi()
+    )
     msg = f"🔔 **Yeni Şikayet**\nKod: `{kod}`\nSakin: {sakin['ad_soyad']}\nDetay: {aciklama}"
     if foto_url:
         await context.bot.send_photo(chat_id=YONETICI_ID, photo=foto_url, caption=msg, parse_mode="Markdown")
@@ -847,6 +850,21 @@ def sikayet_al():
 def bot_motoru_baslat():
     asyncio.set_event_loop(bot_loop)
     bot_loop.run_until_complete(application.initialize())
+
+    varsayilan_komutlar = [BotCommand("start", "Botu Başlat / Ana Menü")]
+    bot_loop.run_until_complete(application.bot.set_my_commands(varsayilan_komutlar))
+
+    if YONETICI_ID:
+        yonetici_komutlari = [
+            BotCommand("start", "Botu Başlat / Ana Menü"),
+            BotCommand("panel", "Yönetici Paneli")
+        ]
+        bot_loop.run_until_complete(
+            application.bot.set_my_commands(
+                yonetici_komutlari,
+                scope=BotCommandScopeChat(chat_id=int(YONETICI_ID))
+            )
+        )
 
     dis_url = os.getenv("RENDER_EXTERNAL_URL")
     if dis_url:
