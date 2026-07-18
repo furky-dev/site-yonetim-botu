@@ -15,7 +15,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 YONETICI_ID = os.getenv("YONETICI_ID")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-AD, DAIRE, KAT_BLOK, SIKAYET_DETAY, KVKK_ONAY = range(5)
+AD, DAIRE, KAT_BLOK, SIKAYET_DETAY, KVKK_ONAY, FOTOGRAF_SOR = range(6)
 
 # --- YARDIMCI FONKSİYONLAR ---
 def takip_kodu_uret(): return f"#SB-{''.join(random.choices(string.digits, k=4))}"
@@ -24,6 +24,12 @@ def kategori_klavyesi():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🛗 Asansör", callback_data="Asansör"), InlineKeyboardButton("🧹 Temizlik", callback_data="Temizlik")],
         [InlineKeyboardButton("💡 Aydınlatma", callback_data="Aydınlatma"), InlineKeyboardButton("📦 Diğer", callback_data="Diğer")]
+    ])
+
+def fotograf_sor_klavyesi():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📷 Evet, Fotoğraf Ekle", callback_data="foto_evet")],
+        [InlineKeyboardButton("⏭️ Hayır, Fotoğrafsız Gönder", callback_data="foto_hayir")]
     ])
 
 async def upload_photo_to_supabase(file_id, context):
@@ -523,17 +529,17 @@ async def kategori_secimi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     context.user_data['kategori'] = query.data
-    await query.edit_message_text(f"📝 Seçilen: {query.data}. Detay yazın veya fotoğraf gönderin.")
+    await query.edit_message_text(f"📝 Seçilen: {query.data}.\n\nŞikayetinizi detaylı yazın:")
     return SIKAYET_DETAY
 
-async def handle_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message.photo:
-        context.user_data['fotograf_url'] = await upload_photo_to_supabase(update.message.photo[-1].file_id, context)
-        await update.message.reply_text("📸 Fotoğraf alındı! Şikayet detayını yazın:")
-        return SIKAYET_DETAY
+async def get_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['aciklama'] = update.message.text
+    await update.message.reply_text("📷 Fotoğraf eklemek ister misiniz?", reply_markup=fotograf_sor_klavyesi())
+    return FOTOGRAF_SOR
 
-    aciklama, foto_url = update.message.text, context.user_data.get('fotograf_url')
-    sakin = supabase.table("sakinler").select("*").eq("telegram_id", str(update.message.chat_id)).execute().data[0]
+async def sikayeti_kaydet_ve_bildir(chat_id, context: ContextTypes.DEFAULT_TYPE, foto_url):
+    sakin = supabase.table("sakinler").select("*").eq("telegram_id", str(chat_id)).execute().data[0]
+    aciklama = context.user_data['aciklama']
     kod = takip_kodu_uret()
     supabase.table("sikayetler").insert({
         "sakin_id": int(sakin['telegram_id']), "ad_soyad": sakin['ad_soyad'], "daire_no": sakin['daire_no'],
@@ -541,10 +547,26 @@ async def handle_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYP
         "aciklama": aciklama, "fotograf_url": foto_url, "takip_kodu": kod, "durum": "Beklemede",
         "kvkk_onay": sakin.get('kvkk_onay', True), "kvkk_onay_tarihi": sakin.get('kvkk_onay_tarihi')
     }).execute()
-    await update.message.reply_text(f"✅ Şikayetiniz alındı! Takip kodu: `{kod}`", parse_mode="Markdown")
+    await context.bot.send_message(chat_id, f"✅ Şikayetiniz alındı! Takip kodu: `{kod}`", parse_mode="Markdown")
     msg = f"🔔 **Yeni Şikayet**\nKod: `{kod}`\nSakin: {sakin['ad_soyad']}\nDetay: {aciklama}"
-    if foto_url: await context.bot.send_photo(chat_id=YONETICI_ID, photo=foto_url, caption=msg, parse_mode="Markdown")
-    else: await context.bot.send_message(chat_id=YONETICI_ID, text=msg, parse_mode="Markdown")
+    if foto_url:
+        await context.bot.send_photo(chat_id=YONETICI_ID, photo=foto_url, caption=msg, parse_mode="Markdown")
+    else:
+        await context.bot.send_message(chat_id=YONETICI_ID, text=msg, parse_mode="Markdown")
+
+async def foto_sor_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if query.data == "foto_hayir":
+        await query.edit_message_text("Şikayetiniz kaydediliyor...")
+        await sikayeti_kaydet_ve_bildir(query.message.chat_id, context, None)
+        return ConversationHandler.END
+    await query.edit_message_text("📷 Lütfen fotoğrafı gönderin (galeri veya kameradan seçebilirsiniz):")
+    return FOTOGRAF_SOR
+
+async def get_sikayet_fotografi(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    foto_url = await upload_photo_to_supabase(update.message.photo[-1].file_id, context)
+    await sikayeti_kaydet_ve_bildir(update.message.chat_id, context, foto_url)
     return ConversationHandler.END
 
 # --- YÖNETİCİ PANELİ ---
@@ -620,7 +642,9 @@ application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 conv = ConversationHandler(entry_points=[CommandHandler('start', start)],
     states={KVKK_ONAY:[CallbackQueryHandler(kvkk_onay_callback, pattern="^kvkk_kabul$")],
             AD:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_ad)], DAIRE:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_daire)],
-            KAT_BLOK:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_kat_blok)], SIKAYET_DETAY:[MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_sikayet_detay)]},
+            KAT_BLOK:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_kat_blok)],
+            SIKAYET_DETAY:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_sikayet_detay)],
+            FOTOGRAF_SOR:[CallbackQueryHandler(foto_sor_callback, pattern="^foto_(evet|hayir)$"), MessageHandler(filters.PHOTO, get_sikayet_fotografi)]},
     fallbacks=[CommandHandler('start', start)])
 
 application.add_handler(conv)
