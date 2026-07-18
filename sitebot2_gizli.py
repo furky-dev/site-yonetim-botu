@@ -1,9 +1,10 @@
 import logging, random, string, os, threading, asyncio, uuid
+from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template_string
 from supabase import create_client, Client
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, filters, 
+    ApplicationBuilder, CommandHandler, MessageHandler, filters,
     ContextTypes, CallbackQueryHandler, ConversationHandler
 )
 
@@ -14,7 +15,7 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 YONETICI_ID = os.getenv("YONETICI_ID")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-AD, DAIRE, KAT_BLOK, SIKAYET_DETAY = range(4)
+AD, DAIRE, KAT_BLOK, SIKAYET_DETAY, KVKK_ONAY = range(5)
 
 # --- YARDIMCI FONKSİYONLAR ---
 def takip_kodu_uret(): return f"#SB-{''.join(random.choices(string.digits, k=4))}"
@@ -206,6 +207,36 @@ HTML_FORM = """
     color: #08519c;
     cursor: pointer;
   }
+  .kvkk-bilgi {
+    font-size: 16px;
+    color: #444;
+    margin: 4px 0 18px;
+  }
+  .kvkk-bilgi a {
+    color: #08519c;
+    font-weight: 700;
+  }
+  .kvkk-onay-kutusu {
+    background: #f5f8fc;
+    border: 2px solid #c7d7ea;
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .kvkk-onay-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    font-weight: 400;
+    font-size: 17px;
+    color: #222;
+    cursor: pointer;
+  }
+  .kvkk-onay-label input[type="checkbox"] {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
 </style>
 </head>
 <body>
@@ -256,6 +287,15 @@ HTML_FORM = """
         <div class="foto-durum" id="fotoDurum"></div>
       </div>
 
+      <p class="kvkk-bilgi">Kişisel verileriniz KVKK kapsamında işlenmektedir. Detaylar için: <a href="/kvkk" target="_blank" rel="noopener">Aydınlatma Metnini Oku</a></p>
+
+      <div class="field kvkk-onay-kutusu">
+        <label class="kvkk-onay-label">
+          <input type="checkbox" id="acik_riza" name="acik_riza">
+          <span>Kişisel verilerimin yurt dışında (Japonya) bulunan sunucularda barındırılmasına <b>açık rıza veriyorum.</b></span>
+        </label>
+      </div>
+
       <button type="submit" class="gonder-btn" id="gonderBtn">ŞİKAYETİ GÖNDER</button>
     </form>
   </div>
@@ -294,9 +334,16 @@ document.getElementById('sikayetForm').addEventListener('submit', async (e) => {
   const daireNo = document.getElementById('daire_no').value.trim();
   const kategori = document.getElementById('kategori').value;
   const aciklama = document.getElementById('aciklama').value.trim();
+  const acikRiza = document.getElementById('acik_riza').checked;
 
   if (!adSoyad || !daireNo || !kategori || !aciklama) {
     hataEl.textContent = 'Lütfen Ad Soyad, Daire No, Konu ve Şikayet Detayı alanlarını doldurun.';
+    hataEl.style.display = 'block';
+    return;
+  }
+
+  if (!acikRiza) {
+    hataEl.textContent = 'Devam etmek için KVKK açık rıza onay kutusunu işaretlemeniz gerekiyor.';
     hataEl.style.display = 'block';
     return;
   }
@@ -331,6 +378,95 @@ document.getElementById('sikayetForm').addEventListener('submit', async (e) => {
 </html>
 """
 
+# --- KVKK AYDINLATMA METNİ SAYFASI ---
+HTML_KVKK = """
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>KVKK Aydınlatma Metni</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #f2f4f7;
+    color: #1a1a1a;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 19px;
+    line-height: 1.6;
+    padding: 20px;
+  }
+  .card {
+    background: #ffffff;
+    max-width: 700px;
+    margin: 0 auto;
+    border-radius: 16px;
+    padding: 28px 24px 36px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+  }
+  h1 { font-size: 26px; color: #08326b; margin-top: 0; }
+  h2 { font-size: 21px; color: #08326b; margin-top: 30px; }
+  .geri-btn {
+    display: inline-block;
+    margin-top: 30px;
+    padding: 14px 22px;
+    font-size: 18px;
+    font-weight: 700;
+    background: #08519c;
+    color: #fff;
+    border-radius: 10px;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+<div class="card">
+<h1>Kişisel Verilerin Korunması Kanunu Kapsamında Aydınlatma Metni</h1>
+
+<p><b>Veri Sorumlusu:</b> xxxxxxxxxx</p>
+
+<p>Bu Aydınlatma Metni, 6698 sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") uyarınca, veri sorumlusu sıfatıyla xxxxxxxxxx tarafından, Telegram botu ve web formu üzerinden şikayet bildirim hizmeti kapsamında işlenen kişisel verileriniz hakkında sizi bilgilendirmek amacıyla hazırlanmıştır.</p>
+
+<h2>1. İşlenen Kişisel Veriler</h2>
+<p>Ad soyad, daire numarası, kat/blok bilgisi, şikayet konusu ve açıklaması, varsa eklediğiniz fotoğraf ve (Telegram kullanıyorsanız) Telegram kullanıcı kimliğiniz işlenmektedir.</p>
+
+<h2>2. İşlenme Amacı</h2>
+<p>Verileriniz; bina/site içerisindeki şikayetlerin kayıt altına alınması, ilgili yöneticiye iletilmesi, takip kodu ile durumunun sorgulanabilmesi ve bu süreçle ilgili tarafınıza bilgi verilmesi amacıyla işlenmektedir.</p>
+
+<h2>3. Aktarılabileceği Taraflar</h2>
+<p>Verileriniz; bina/site yöneticisi ile, hizmetin teknik altyapısını sağlayan Supabase Inc. (veriler Tokyo/Japonya bölgesinde barındırılmaktadır) ve Telegram ile sınırlı olarak paylaşılabilir.</p>
+<p><b>Yurt dışı aktarım:</b> Verileriniz Türkiye dışında (Japonya) barındırıldığından, bu aktarım ancak açık rızanızın alınmasıyla mümkündür ve form/bot üzerinden ayrıca bu onayınız istenmektedir.</p>
+
+<h2>4. Toplama Yöntemi ve Hukuki Sebebi</h2>
+<p>Verileriniz Telegram botu veya web formu aracılığıyla doğrudan sizin tarafınızdan paylaşılması yoluyla toplanır; KVKK m.5'teki "veri sorumlusunun meşru menfaati" hukuki sebebine, yurt dışı aktarım özelinde ise açık rızanıza dayanılarak işlenir.</p>
+
+<h2>5. Haklarınız (KVKK m. 11)</h2>
+<p>Kişisel verinizin işlenip işlenmediğini öğrenme, bilgi talep etme, işlenme amacını öğrenme, aktarıldığı üçüncü kişileri bilme, düzeltilmesini/silinmesini isteme, itiraz etme ve zararın giderilmesini talep etme haklarına sahipsiniz. Bu haklarınızı kullanmak için <b>.........@gmail.com</b> adresinden bize ulaşabilirsiniz.</p>
+
+<a class="geri-btn" href="/">⬅ Forma Dön</a>
+</div>
+</body>
+</html>
+"""
+
+# --- KVKK ONAY YARDIMCI FONKSİYONU ---
+def kvkk_onay_klavyesi():
+    kb = [[InlineKeyboardButton("✅ Kabul Ediyorum, Devam Et", callback_data="kvkk_kabul")]]
+    dis_url = os.getenv("RENDER_EXTERNAL_URL")
+    if dis_url:
+        kb.append([InlineKeyboardButton("📄 Aydınlatma Metnini Oku", url=f"{dis_url}/kvkk")])
+    return InlineKeyboardMarkup(kb)
+
+KVKK_MESAJI = (
+    "🔒 *Kişisel Verilerinizin Korunması Hakkında*\n\n"
+    "Şikayetinizi işleyebilmemiz için ad soyad, daire bilginiz ve şikayet "
+    "içeriğiniz kaydedilecektir. Bu veriler yurt dışında (Japonya) bulunan "
+    "sunucularda barındırılmaktadır.\n\n"
+    "Devam etmek için aşağıdaki butona basarak bu duruma açık rıza vermeniz "
+    "gerekmektedir."
+)
+
 # --- CONVERSATION FONKSİYONLARI ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
@@ -339,10 +475,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
     res = supabase.table("sakinler").select("*").eq("telegram_id", str(chat_id)).execute()
     if res.data:
-        await update.message.reply_text("👋 Tekrar hoş geldiniz! Kategori seçin:", reply_markup=kategori_klavyesi())
-        return SIKAYET_DETAY
-    await update.message.reply_text("🏠 Premium Residence'a hoş geldiniz. Lütfen Adınızı ve Soyadınızı girin:")
-    return AD
+        sakin = res.data[0]
+        if sakin.get("kvkk_onay"):
+            await update.message.reply_text("👋 Tekrar hoş geldiniz! Kategori seçin:", reply_markup=kategori_klavyesi())
+            return SIKAYET_DETAY
+        context.user_data['kvkk_yeni_kayit'] = False
+        await update.message.reply_text(KVKK_MESAJI, reply_markup=kvkk_onay_klavyesi(), parse_mode="Markdown")
+        return KVKK_ONAY
+    context.user_data['kvkk_yeni_kayit'] = True
+    await update.message.reply_text(KVKK_MESAJI, reply_markup=kvkk_onay_klavyesi(), parse_mode="Markdown")
+    return KVKK_ONAY
+
+async def kvkk_onay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    if context.user_data.get('kvkk_yeni_kayit'):
+        await query.edit_message_text("✅ Teşekkürler. Şimdi Adınızı ve Soyadınızı girin:")
+        return AD
+    supabase.table("sakinler").update({
+        "kvkk_onay": True,
+        "kvkk_onay_tarihi": datetime.now(timezone.utc).isoformat()
+    }).eq("telegram_id", str(query.message.chat_id)).execute()
+    await query.edit_message_text("✅ Teşekkürler. Kategori seçin:")
+    await context.bot.send_message(query.message.chat_id, "📋 Kategori seçin:", reply_markup=kategori_klavyesi())
+    return SIKAYET_DETAY
 
 async def get_ad(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['ad_soyad'] = update.message.text
@@ -357,7 +513,8 @@ async def get_daire(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_kat_blok(update: Update, context: ContextTypes.DEFAULT_TYPE):
     supabase.table("sakinler").insert({
         "telegram_id": str(update.message.chat_id), "ad_soyad": context.user_data['ad_soyad'],
-        "daire_no": context.user_data['daire_no'], "kat_blok": update.message.text
+        "daire_no": context.user_data['daire_no'], "kat_blok": update.message.text,
+        "kvkk_onay": True, "kvkk_onay_tarihi": datetime.now(timezone.utc).isoformat()
     }).execute()
     await update.message.reply_text("✅ Kayıt tamam! Kategori seçin:", reply_markup=kategori_klavyesi())
     return SIKAYET_DETAY
@@ -381,7 +538,8 @@ async def handle_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYP
     supabase.table("sikayetler").insert({
         "sakin_id": int(sakin['telegram_id']), "ad_soyad": sakin['ad_soyad'], "daire_no": sakin['daire_no'],
         "kat_blok": sakin.get('kat_blok', ''), "kategori": context.user_data['kategori'],
-        "aciklama": aciklama, "fotograf_url": foto_url, "takip_kodu": kod, "durum": "Beklemede"
+        "aciklama": aciklama, "fotograf_url": foto_url, "takip_kodu": kod, "durum": "Beklemede",
+        "kvkk_onay": sakin.get('kvkk_onay', True), "kvkk_onay_tarihi": sakin.get('kvkk_onay_tarihi')
     }).execute()
     await update.message.reply_text(f"✅ Şikayetiniz alındı! Takip kodu: `{kod}`", parse_mode="Markdown")
     msg = f"🔔 **Yeni Şikayet**\nKod: `{kod}`\nSakin: {sakin['ad_soyad']}\nDetay: {aciklama}"
@@ -460,7 +618,8 @@ flask_app = Flask(__name__)
 application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
 conv = ConversationHandler(entry_points=[CommandHandler('start', start)],
-    states={AD:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_ad)], DAIRE:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_daire)],
+    states={KVKK_ONAY:[CallbackQueryHandler(kvkk_onay_callback, pattern="^kvkk_kabul$")],
+            AD:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_ad)], DAIRE:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_daire)],
             KAT_BLOK:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_kat_blok)], SIKAYET_DETAY:[MessageHandler(filters.PHOTO | filters.TEXT & ~filters.COMMAND, handle_sikayet_detay)]},
     fallbacks=[CommandHandler('start', start)])
 
@@ -484,6 +643,10 @@ async def _web_sikayet_bildir(kod, ad_soyad, daire_no, aciklama, foto_url):
 def index():
     return render_template_string(HTML_FORM)
 
+@flask_app.route("/kvkk")
+def kvkk_metni():
+    return render_template_string(HTML_KVKK)
+
 @flask_app.route("/sikayet", methods=["POST"])
 def sikayet_al():
     ad_soyad = request.form.get("ad_soyad", "").strip()
@@ -491,10 +654,14 @@ def sikayet_al():
     kat_blok = request.form.get("kat_blok", "").strip()
     kategori = request.form.get("kategori", "").strip()
     aciklama = request.form.get("aciklama", "").strip()
+    acik_riza = request.form.get("acik_riza") == "on"
     foto = request.files.get("fotograf")
 
     if not ad_soyad or not daire_no or not kategori or not aciklama:
         return jsonify({"success": False, "error": "Lütfen zorunlu alanları doldurun."}), 400
+
+    if not acik_riza:
+        return jsonify({"success": False, "error": "Devam etmek için KVKK açık rıza onay kutusunu işaretlemeniz gerekiyor."}), 400
 
     foto_url = None
     if foto and foto.filename:
@@ -504,7 +671,8 @@ def sikayet_al():
     supabase.table("sikayetler").insert({
         "ad_soyad": ad_soyad, "daire_no": daire_no, "kat_blok": kat_blok,
         "kategori": kategori, "aciklama": aciklama, "fotograf_url": foto_url,
-        "takip_kodu": kod, "durum": "Beklemede"
+        "takip_kodu": kod, "durum": "Beklemede",
+        "kvkk_onay": True, "kvkk_onay_tarihi": datetime.now(timezone.utc).isoformat()
     }).execute()
 
     asyncio.run_coroutine_threadsafe(
