@@ -2,7 +2,7 @@ import logging, random, string, os, threading, asyncio, uuid
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template_string
 from supabase import create_client, Client
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, filters,
     ContextTypes, CallbackQueryHandler, ConversationHandler
@@ -17,8 +17,16 @@ YONETICI_ID = os.getenv("YONETICI_ID")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 AD, DAIRE, KAT_BLOK, SIKAYET_DETAY, KVKK_ONAY, FOTOGRAF_SOR = range(6)
 
+YENI_SIKAYET_BUTONU = "📝 Yeni Şikayet Bildir"
+SIKAYETLERIM_BUTONU = "📋 Şikayetlerim"
+
 # --- YARDIMCI FONKSİYONLAR ---
 def takip_kodu_uret(): return f"#SB-{''.join(random.choices(string.digits, k=4))}"
+
+def kod_normallestir(ham):
+    ham = ham.strip().upper()
+    rakamlar = ''.join(ch for ch in ham if ch.isdigit())
+    return f"#SB-{rakamlar}" if rakamlar else ham
 
 def kategori_klavyesi():
     return InlineKeyboardMarkup([
@@ -31,6 +39,12 @@ def fotograf_sor_klavyesi():
         [InlineKeyboardButton("📷 Evet, Fotoğraf Ekle", callback_data="foto_evet")],
         [InlineKeyboardButton("⏭️ Hayır, Fotoğrafsız Gönder", callback_data="foto_hayir")]
     ])
+
+def ana_menu_klavyesi():
+    return ReplyKeyboardMarkup(
+        [[YENI_SIKAYET_BUTONU], [SIKAYETLERIM_BUTONU]],
+        resize_keyboard=True
+    )
 
 async def upload_photo_to_supabase(file_id, context):
     try:
@@ -89,7 +103,16 @@ HTML_FORM = """
   .subtitle {
     font-size: 19px;
     color: #333;
+    margin: 0 0 12px;
+  }
+  .sorgu-link {
+    display: block;
+    font-size: 17px;
     margin: 0 0 28px;
+  }
+  .sorgu-link a {
+    color: #08519c;
+    font-weight: 700;
   }
   label {
     display: block;
@@ -251,6 +274,7 @@ HTML_FORM = """
   <div id="formGorunumu">
     <h1>🏢 Şikayet Bildir</h1>
     <p class="subtitle">Aşağıdaki alanları doldurup en alttaki büyük butona basın.</p>
+    <p class="sorgu-link">Daha önce şikayet bildirdiyseniz: <a href="/sorgula">Şikayet Durumunu Sorgula</a></p>
 
     <div class="hata" id="hataMesaji"></div>
 
@@ -310,7 +334,7 @@ HTML_FORM = """
     <div class="tik">✅</div>
     <h2>Şikayetiniz Alındı</h2>
     <div class="kod-kutu" id="takipKodu"></div>
-    <p>Bu kodu not edin. Durumu Telegram üzerinden<br><b>/takip</b> komutuyla sorgulayabilirsiniz.</p>
+    <p>Bu kodu not edin. Durumu <a href="/sorgula">Şikayet Durumunu Sorgula</a> sayfasından bu kodla sorgulayabilirsiniz.</p>
     <button type="button" class="yeni-btn" onclick="location.reload()">Yeni Şikayet Bildir</button>
   </div>
 
@@ -456,6 +480,106 @@ HTML_KVKK = """
 </html>
 """
 
+# --- ŞİKAYET SORGULAMA SAYFASI ---
+HTML_SORGULA = """
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Şikayet Sorgula</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #f2f4f7;
+    color: #1a1a1a;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    font-size: 20px;
+    line-height: 1.5;
+    padding: 20px;
+  }
+  .card {
+    background: #ffffff;
+    max-width: 560px;
+    margin: 0 auto;
+    border-radius: 16px;
+    padding: 28px 24px 36px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+  }
+  h1 { font-size: 28px; color: #08326b; margin: 0 0 20px; }
+  label { display: block; font-size: 19px; font-weight: 700; margin-bottom: 8px; }
+  input[type="text"] {
+    width: 100%;
+    font-size: 20px;
+    padding: 16px;
+    border: 2px solid #999;
+    border-radius: 10px;
+    margin-bottom: 16px;
+  }
+  .sorgu-btn {
+    width: 100%;
+    min-height: 60px;
+    font-size: 20px;
+    font-weight: 700;
+    border: none;
+    border-radius: 12px;
+    background: #08519c;
+    color: #fff;
+    cursor: pointer;
+  }
+  .hata-sorgu {
+    background: #fdecec;
+    border: 2px solid #c81e1e;
+    color: #8a1414;
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 20px;
+  }
+  .sonuc-kutu {
+    background: #eaf1fb;
+    border: 2px solid #08519c;
+    border-radius: 12px;
+    padding: 18px 20px;
+    margin-bottom: 22px;
+    font-size: 18px;
+  }
+  .sonuc-kutu p { margin: 6px 0; }
+  .geri-link { display: block; margin-top: 20px; font-size: 17px; text-align: center; }
+  .geri-link a { color: #08519c; font-weight: 700; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔎 Şikayet Sorgula</h1>
+
+  {% if hata %}
+  <div class="hata-sorgu">{{ hata }}</div>
+  {% endif %}
+
+  {% if sonuc %}
+  <div class="sonuc-kutu">
+    <p><b>Kod:</b> {{ sonuc.takip_kodu }}</p>
+    <p><b>Kategori:</b> {{ sonuc.kategori }}</p>
+    <p><b>Durum:</b> {{ sonuc.durum }}</p>
+    <p><b>Detay:</b> {{ sonuc.aciklama }}</p>
+  </div>
+  {% endif %}
+
+  <form method="get" action="/sorgula">
+    <label for="kod">Takip Kodunuz</label>
+    <input type="text" id="kod" name="kod" placeholder="#SB-1234" value="{{ kod_ham or '' }}" required>
+    <button type="submit" class="sorgu-btn">SORGULA</button>
+  </form>
+
+  <p class="geri-link"><a href="/">⬅ Şikayet Formuna Dön</a></p>
+</div>
+</body>
+</html>
+"""
+
 # --- KVKK ONAY YARDIMCI FONKSİYONU ---
 def kvkk_onay_klavyesi():
     kb = [[InlineKeyboardButton("✅ Kabul Ediyorum, Devam Et", callback_data="kvkk_kabul")]]
@@ -483,7 +607,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if res.data:
         sakin = res.data[0]
         if sakin.get("kvkk_onay"):
-            await update.message.reply_text("👋 Tekrar hoş geldiniz! Kategori seçin:", reply_markup=kategori_klavyesi())
+            await update.message.reply_text("👋 Tekrar hoş geldiniz!", reply_markup=ana_menu_klavyesi())
+            await update.message.reply_text("Kategori seçin:", reply_markup=kategori_klavyesi())
             return SIKAYET_DETAY
         context.user_data['kvkk_yeni_kayit'] = False
         await update.message.reply_text(KVKK_MESAJI, reply_markup=kvkk_onay_klavyesi(), parse_mode="Markdown")
@@ -502,7 +627,8 @@ async def kvkk_onay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "kvkk_onay": True,
         "kvkk_onay_tarihi": datetime.now(timezone.utc).isoformat()
     }).eq("telegram_id", str(query.message.chat_id)).execute()
-    await query.edit_message_text("✅ Teşekkürler. Kategori seçin:")
+    await query.edit_message_text("✅ Teşekkürler.")
+    await context.bot.send_message(query.message.chat_id, "Ana menü:", reply_markup=ana_menu_klavyesi())
     await context.bot.send_message(query.message.chat_id, "📋 Kategori seçin:", reply_markup=kategori_klavyesi())
     return SIKAYET_DETAY
 
@@ -522,8 +648,25 @@ async def get_kat_blok(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "daire_no": context.user_data['daire_no'], "kat_blok": update.message.text,
         "kvkk_onay": True, "kvkk_onay_tarihi": datetime.now(timezone.utc).isoformat()
     }).execute()
-    await update.message.reply_text("✅ Kayıt tamam! Kategori seçin:", reply_markup=kategori_klavyesi())
+    await update.message.reply_text("✅ Kayıt tamam!", reply_markup=ana_menu_klavyesi())
+    await update.message.reply_text("Kategori seçin:", reply_markup=kategori_klavyesi())
     return SIKAYET_DETAY
+
+async def yeni_sikayet_giris(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("📋 Kategori seçin:", reply_markup=kategori_klavyesi())
+    return SIKAYET_DETAY
+
+async def sikayetlerim(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat_id
+    res = supabase.table("sikayetler").select("*").eq("sakin_id", int(chat_id)).order("id", desc=True).limit(10).execute()
+    if not res.data:
+        await update.message.reply_text("Henüz bir şikayetiniz bulunmuyor.")
+        return
+    satirlar = []
+    for s in res.data:
+        emoji = "🟢" if s['durum'] == "Çözüldü" else "⏳" if s['durum'] == "İnceleniyor" else "🆕"
+        satirlar.append(f"{emoji} `{s['takip_kodu']}` — {s['kategori']}\nDurum: {s['durum']}\nDetay: {s['aciklama']}")
+    await update.message.reply_text("📋 *Şikayetleriniz:*\n\n" + "\n\n".join(satirlar), parse_mode="Markdown")
 
 async def kategori_secimi(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -613,33 +756,15 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(int(s['sakin_id']), f"🔔 Şikayet ({kod}) durumu: {d} oldu.")
         await yonetici_panel(update, context)
 
-async def takip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("🔎 Şikayet durumunu sorgulamak için lütfen kodunuzu girin.\nÖrnek: `/takip #SB-1234`")
-    else:
-        kod = context.args[0]
-        res = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute()
-
-        if res.data:
-            s = res.data[0]
-            durum_emoji = "🟢" if s['durum'] == "Çözüldü" else "⏳" if s['durum'] == "İnceleniyor" else "🆕"
-            await update.message.reply_text(
-                f"📋 **Şikayet Detayı**\n"
-                f"Kod: `{s['takip_kodu']}`\n"
-                f"Kategori: {s['kategori']}\n"
-                f"Durum: {durum_emoji} {s['durum']}\n"
-                f"Detay: {s['aciklama']}",
-                parse_mode="Markdown"
-            )
-        else:
-            await update.message.reply_text("❌ Girdiğiniz `#SB-XXXX` kodu ile eşleşen bir şikayet bulunamadı. Lütfen kodu kontrol edip tekrar deneyin.")
-
 # --- BAŞLATICI ---
 flask_app = Flask(__name__)
 
 application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
-conv = ConversationHandler(entry_points=[CommandHandler('start', start)],
+conv = ConversationHandler(entry_points=[
+        CommandHandler('start', start),
+        MessageHandler(filters.Text([YENI_SIKAYET_BUTONU]), yeni_sikayet_giris)
+    ],
     states={KVKK_ONAY:[CallbackQueryHandler(kvkk_onay_callback, pattern="^kvkk_kabul$")],
             AD:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_ad)], DAIRE:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_daire)],
             KAT_BLOK:[MessageHandler(filters.TEXT & ~filters.COMMAND, get_kat_blok)],
@@ -649,7 +774,7 @@ conv = ConversationHandler(entry_points=[CommandHandler('start', start)],
 
 application.add_handler(conv)
 application.add_handler(CommandHandler('panel', yonetici_panel))
-application.add_handler(CommandHandler('takip', takip))
+application.add_handler(MessageHandler(filters.Text([SIKAYETLERIM_BUTONU]), sikayetlerim))
 application.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansör|Aydınlatma|Temizlik|Diğer)$"))
 application.add_handler(CallbackQueryHandler(panel_callback))
 
@@ -670,6 +795,20 @@ def index():
 @flask_app.route("/kvkk")
 def kvkk_metni():
     return render_template_string(HTML_KVKK)
+
+@flask_app.route("/sorgula")
+def sorgula():
+    kod_ham = request.args.get("kod", "").strip()
+    sonuc = None
+    hata = None
+    if kod_ham:
+        kod = kod_normallestir(kod_ham)
+        res = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute()
+        if res.data:
+            sonuc = res.data[0]
+        else:
+            hata = "Bu koda ait bir şikayet bulunamadı. Kodu kontrol edip tekrar deneyin."
+    return render_template_string(HTML_SORGULA, sonuc=sonuc, hata=hata, kod_ham=kod_ham)
 
 @flask_app.route("/sikayet", methods=["POST"])
 def sikayet_al():
