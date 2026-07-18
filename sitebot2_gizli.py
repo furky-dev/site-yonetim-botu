@@ -292,7 +292,7 @@ HTML_FORM = """
       <div class="field kvkk-onay-kutusu">
         <label class="kvkk-onay-label">
           <input type="checkbox" id="acik_riza" name="acik_riza">
-          <span>Kişisel verilerimin yurt dışında (Japonya) bulunan sunucularda barındırılmasına <b>açık rıza veriyorum.</b></span>
+          <span>Kişisel verilerimin yurt dışında bulunan sunucularda barındırılmasına <b>açık rıza veriyorum.</b></span>
         </label>
       </div>
 
@@ -461,7 +461,7 @@ def kvkk_onay_klavyesi():
 KVKK_MESAJI = (
     "🔒 *Kişisel Verilerinizin Korunması Hakkında*\n\n"
     "Şikayetinizi işleyebilmemiz için ad soyad, daire bilginiz ve şikayet "
-    "içeriğiniz kaydedilecektir. Bu veriler yurt dışında (Japonya) bulunan "
+    "içeriğiniz kaydedilecektir. Bu veriler yurt dışında bulunan "
     "sunucularda barındırılmaktadır.\n\n"
     "Devam etmek için aşağıdaki butona basarak bu duruma açık rıza vermeniz "
     "gerekmektedir."
@@ -531,7 +531,7 @@ async def handle_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYP
         context.user_data['fotograf_url'] = await upload_photo_to_supabase(update.message.photo[-1].file_id, context)
         await update.message.reply_text("📸 Fotoğraf alındı! Şikayet detayını yazın:")
         return SIKAYET_DETAY
-    
+
     aciklama, foto_url = update.message.text, context.user_data.get('fotograf_url')
     sakin = supabase.table("sakinler").select("*").eq("telegram_id", str(update.message.chat_id)).execute().data[0]
     kod = takip_kodu_uret()
@@ -571,18 +571,18 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         s = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute().data[0]
         # Hangi listeden geldiğini anlamak için mevcut durumu yakalıyoruz
         donulecek_liste = "liste_inceleme" if s['durum'] == "İnceleniyor" else "liste_yeni"
-        
+
         txt = f"📋 **{kod}**\n👤 {s['ad_soyad']}\n🏠 {s['daire_no']}\n📝 {s['aciklama']}\n🟢 {s['durum']}"
         kb = [
-            [InlineKeyboardButton("⏳ İncelemeye Al", callback_data=f"durum_inceleme_{kod}"), 
-             InlineKeyboardButton("✅ Çözüldü", callback_data=f"durum_cozuldu_{kod}")], 
+            [InlineKeyboardButton("⏳ İncelemeye Al", callback_data=f"durum_inceleme_{kod}"),
+             InlineKeyboardButton("✅ Çözüldü", callback_data=f"durum_cozuldu_{kod}")],
             [InlineKeyboardButton("⬅️ Listeye Dön", callback_data=donulecek_liste)] # Dinamik dönüş
         ]
         try: await query.message.delete()
         except: pass
         if s.get('fotograf_url'): await context.bot.send_photo(query.message.chat_id, s['fotograf_url'], caption=txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
         else: await context.bot.send_message(query.message.chat_id, txt, reply_markup=InlineKeyboardMarkup(kb), parse_mode="Markdown")
-            
+
     elif query.data.startswith("durum_"):
         _, yeni, kod = query.data.split("_")
         d = "İnceleniyor" if yeni == "inceleme" else "Çözüldü"
@@ -592,12 +592,12 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await yonetici_panel(update, context)
 
 async def takip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args: 
+    if not context.args:
         await update.message.reply_text("🔎 Şikayet durumunu sorgulamak için lütfen kodunuzu girin.\nÖrnek: `/takip #SB-1234`")
     else:
         kod = context.args[0]
         res = supabase.table("sikayetler").select("*").eq("takip_kodu", kod).execute()
-        
+
         if res.data:
             s = res.data[0]
             durum_emoji = "🟢" if s['durum'] == "Çözüldü" else "⏳" if s['durum'] == "İnceleniyor" else "🆕"
@@ -606,7 +606,7 @@ async def takip(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Kod: `{s['takip_kodu']}`\n"
                 f"Kategori: {s['kategori']}\n"
                 f"Durum: {durum_emoji} {s['durum']}\n"
-                f"Detay: {s['aciklama']}", 
+                f"Detay: {s['aciklama']}",
                 parse_mode="Markdown"
             )
         else:
