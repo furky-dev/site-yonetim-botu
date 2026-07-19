@@ -1,6 +1,9 @@
 import logging, random, string, os, threading, asyncio, uuid
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template_string
+from werkzeug.middleware.proxy_fix import ProxyFix
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from supabase import create_client, Client
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, BotCommand, BotCommandScopeChat
 from telegram.ext import (
@@ -279,6 +282,11 @@ HTML_FORM = """
     <div class="hata" id="hataMesaji"></div>
 
     <form id="sikayetForm">
+      <div style="position:absolute;left:-9999px;top:-9999px" aria-hidden="true">
+        <label for="web_sitesi">Web siteniz</label>
+        <input type="text" id="web_sitesi" name="web_sitesi" tabindex="-1" autocomplete="off">
+      </div>
+
       <div class="field">
         <label for="ad_soyad">Ad Soyad</label>
         <input type="text" id="ad_soyad" name="ad_soyad" required>
@@ -459,10 +467,10 @@ HTML_KVKK = """
 <p>Bu Aydınlatma Metni, 6698 sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") uyarınca, veri sorumlusu sıfatıyla xxxxxxxxxx tarafından, Telegram botu ve web formu üzerinden şikayet bildirim hizmeti kapsamında işlenen kişisel verileriniz hakkında sizi bilgilendirmek amacıyla hazırlanmıştır.</p>
 
 <h2>1. İşlenen Kişisel Veriler</h2>
-<p>Ad soyad, daire numarası, kat/blok bilgisi, şikayet konusu ve açıklaması, varsa eklediğiniz fotoğraf ve (Telegram kullanıyorsanız) Telegram kullanıcı kimliğiniz işlenmektedir.</p>
+<p>Ad soyad, daire numarası, kat/blok bilgisi, şikayet konusu ve açıklaması, varsa eklediğiniz fotoğraf ve (Telegram kullanıyorsanız) Telegram kullanıcı kimliğiniz işlenmektedir. Web formu üzerinden gönderim yaparken, kötüye kullanımın/istenmeyen otomatik gönderimlerin (spam) önlenmesi amacıyla IP adresiniz kısa süreliğine (birkaç dakika) işlenir; kalıcı olarak saklanmaz veya şikayetinizle ilişkilendirilmez.</p>
 
 <h2>2. İşlenme Amacı</h2>
-<p>Verileriniz; bina/site içerisindeki şikayetlerin kayıt altına alınması, ilgili yöneticiye iletilmesi, takip kodu ile durumunun sorgulanabilmesi ve bu süreçle ilgili tarafınıza bilgi verilmesi amacıyla işlenmektedir.</p>
+<p>Verileriniz; bina/site içerisindeki şikayetlerin kayıt altına alınması, ilgili yöneticiye iletilmesi, takip kodu ile durumunun sorgulanabilmesi ve bu süreçle ilgili tarafınıza bilgi verilmesi amacıyla işlenmektedir. IP adresiniz ise yalnızca hizmetin güvenliğinin sağlanması ve kötüye kullanımının önlenmesi amacıyla işlenmektedir.</p>
 
 <h2>3. Aktarılabileceği Taraflar</h2>
 <p>Verileriniz; bina/site yöneticisi ile, hizmetin teknik altyapısını sağlayan Supabase Inc. (veriler Tokyo/Japonya bölgesinde barındırılmaktadır) ve Telegram ile sınırlı olarak paylaşılabilir.</p>
@@ -761,6 +769,17 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- BAŞLATICI ---
 flask_app = Flask(__name__)
+# Render bir proxy arkasında çalıştığı için gerçek istemci IP'sini
+# X-Forwarded-For'dan almak üzere ProxyFix şart — yoksa rate-limit
+# herkesi tek IP (Render'ın proxy'si) sanıp ilk kullanıcıda dolar.
+flask_app.wsgi_app = ProxyFix(flask_app.wsgi_app, x_for=1)
+
+limiter = Limiter(
+    get_remote_address,
+    app=flask_app,
+    default_limits=[],
+    storage_uri="memory://"
+)
 
 application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 
@@ -814,7 +833,13 @@ def sorgula():
     return render_template_string(HTML_SORGULA, sonuc=sonuc, hata=hata, kod_ham=kod_ham)
 
 @flask_app.route("/sikayet", methods=["POST"])
+@limiter.limit("3 per 5 minutes")
 def sikayet_al():
+    # Honeypot: gerçek kullanıcılar bu görünmez alanı hiç görmez/doldurmaz.
+    # Doluysa muhtemelen bot — fark ettirmeden sahte bir başarı dönüyoruz.
+    if request.form.get("web_sitesi", "").strip():
+        return jsonify({"success": True, "takip_kodu": takip_kodu_uret()})
+
     ad_soyad = request.form.get("ad_soyad", "").strip()
     daire_no = request.form.get("daire_no", "").strip()
     kat_blok = request.form.get("kat_blok", "").strip()
@@ -846,6 +871,10 @@ def sikayet_al():
     )
 
     return jsonify({"success": True, "takip_kodu": kod})
+
+@flask_app.errorhandler(429)
+def rate_limit_asildi(e):
+    return jsonify({"success": False, "error": "Çok fazla deneme yapıldı. Lütfen birkaç dakika sonra tekrar deneyin."}), 429
 
 def bot_motoru_baslat():
     asyncio.set_event_loop(bot_loop)
