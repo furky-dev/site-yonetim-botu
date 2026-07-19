@@ -826,12 +826,6 @@ async def _web_sikayet_bildir(kod, ad_soyad, daire_no, aciklama, foto_url):
     else:
         await application.bot.send_message(chat_id=YONETICI_ID, text=msg, parse_mode="Markdown")
 
-@flask_app.route("/dahili-hata-testi")
-def dahili_hata_testi():
-    # GEÇİCİ: hata uyarı sistemini canlıda test etmek için eklendi,
-    # doğrulandıktan sonra kaldırılacak.
-    raise Exception("Bu bir testtir, gerçek bir hata değildir.")
-
 @flask_app.route("/")
 def index():
     return render_template_string(HTML_FORM)
