@@ -462,9 +462,9 @@ HTML_KVKK = """
 <div class="card">
 <h1>Kişisel Verilerin Korunması Kanunu Kapsamında Aydınlatma Metni</h1>
 
-<p><b>Veri Sorumlusu:</b> xxxxxxxxxx</p>
+<p><b>Veri Sorumlusu:</b> Furkan Toptan</p>
 
-<p>Bu Aydınlatma Metni, 6698 sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") uyarınca, veri sorumlusu sıfatıyla xxxxxxxxxx tarafından, Telegram botu ve web formu üzerinden şikayet bildirim hizmeti kapsamında işlenen kişisel verileriniz hakkında sizi bilgilendirmek amacıyla hazırlanmıştır.</p>
+<p>Bu Aydınlatma Metni, 6698 sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") uyarınca, veri sorumlusu sıfatıyla Furkan Toptan tarafından, Telegram botu ve web formu üzerinden şikayet bildirim hizmeti kapsamında işlenen kişisel verileriniz hakkında sizi bilgilendirmek amacıyla hazırlanmıştır.</p>
 
 <h2>1. İşlenen Kişisel Veriler</h2>
 <p>Ad soyad, daire numarası, kat/blok bilgisi, şikayet konusu ve açıklaması, varsa eklediğiniz fotoğraf ve (Telegram kullanıyorsanız) Telegram kullanıcı kimliğiniz işlenmektedir. Web formu üzerinden gönderim yaparken, kötüye kullanımın/istenmeyen otomatik gönderimlerin (spam) önlenmesi amacıyla IP adresiniz kısa süreliğine (birkaç dakika) işlenir; kalıcı olarak saklanmaz veya şikayetinizle ilişkilendirilmez.</p>
@@ -480,7 +480,7 @@ HTML_KVKK = """
 <p>Verileriniz Telegram botu veya web formu aracılığıyla doğrudan sizin tarafınızdan paylaşılması yoluyla toplanır; KVKK m.5'teki "veri sorumlusunun meşru menfaati" hukuki sebebine, yurt dışı aktarım özelinde ise açık rızanıza dayanılarak işlenir.</p>
 
 <h2>5. Haklarınız (KVKK m. 11)</h2>
-<p>Kişisel verinizin işlenip işlenmediğini öğrenme, bilgi talep etme, işlenme amacını öğrenme, aktarıldığı üçüncü kişileri bilme, düzeltilmesini/silinmesini isteme, itiraz etme ve zararın giderilmesini talep etme haklarına sahipsiniz. Bu haklarınızı kullanmak için <b>.........@gmail.com</b> adresinden bize ulaşabilirsiniz.</p>
+<p>Kişisel verinizin işlenip işlenmediğini öğrenme, bilgi talep etme, işlenme amacını öğrenme, aktarıldığı üçüncü kişileri bilme, düzeltilmesini/silinmesini isteme, itiraz etme ve zararın giderilmesini talep etme haklarına sahipsiniz. Bu haklarınızı kullanmak için <b>furkantoptang4+kvkk@gmail.com</b> adresinden bize ulaşabilirsiniz.</p>
 
 <a class="geri-btn" href="/">⬅ Forma Dön</a>
 </div>
