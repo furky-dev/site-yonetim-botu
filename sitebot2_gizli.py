@@ -2,6 +2,7 @@ import logging, random, string, os, threading, asyncio, uuid
 from datetime import datetime, timezone
 from flask import Flask, request, jsonify, render_template_string
 from werkzeug.middleware.proxy_fix import ProxyFix
+from werkzeug.exceptions import HTTPException
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from supabase import create_client, Client
@@ -767,6 +768,20 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(int(s['sakin_id']), f"🔔 Şikayet ({kod}) durumu: {d} oldu.")
         await yonetici_panel(update, context)
 
+async def bot_hata_yakalayici(update, context):
+    # Bot handler'larından biri (conv, panel_callback vb.) beklenmedik bir
+    # hata fırlatırsa buraya düşer — normalde sessizce loglara gömülüp
+    # kaybolurdu, artık yöneticiye anında Telegram mesajı olarak da gider.
+    logging.error("Bot içinde beklenmeyen hata", exc_info=context.error)
+    if YONETICI_ID:
+        try:
+            await context.bot.send_message(
+                chat_id=YONETICI_ID,
+                text=f"⚠️ Bot içinde beklenmeyen bir hata oluştu:\n{type(context.error).__name__}: {context.error}"
+            )
+        except Exception:
+            logging.error("Hata bildirimi gönderilemedi", exc_info=True)
+
 # --- BAŞLATICI ---
 flask_app = Flask(__name__)
 # Render bir proxy arkasında çalıştığı için gerçek istemci IP'sini
@@ -799,6 +814,7 @@ application.add_handler(CommandHandler('panel', yonetici_panel))
 application.add_handler(MessageHandler(filters.Text([SIKAYETLERIM_BUTONU]), sikayetlerim))
 application.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansör|Aydınlatma|Temizlik|Diğer)$"))
 application.add_handler(CallbackQueryHandler(panel_callback))
+application.add_error_handler(bot_hata_yakalayici)
 
 bot_loop = asyncio.new_event_loop()
 flask_app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # foto yüklemede 5MB üst sınır
@@ -809,6 +825,12 @@ async def _web_sikayet_bildir(kod, ad_soyad, daire_no, aciklama, foto_url):
         await application.bot.send_photo(chat_id=YONETICI_ID, photo=foto_url, caption=msg, parse_mode="Markdown")
     else:
         await application.bot.send_message(chat_id=YONETICI_ID, text=msg, parse_mode="Markdown")
+
+@flask_app.route("/dahili-hata-testi")
+def dahili_hata_testi():
+    # GEÇİCİ: hata uyarı sistemini canlıda test etmek için eklendi,
+    # doğrulandıktan sonra kaldırılacak.
+    raise Exception("Bu bir testtir, gerçek bir hata değildir.")
 
 @flask_app.route("/")
 def index():
@@ -875,6 +897,27 @@ def sikayet_al():
 @flask_app.errorhandler(429)
 def rate_limit_asildi(e):
     return jsonify({"success": False, "error": "Çok fazla deneme yapıldı. Lütfen birkaç dakika sonra tekrar deneyin."}), 429
+
+@flask_app.errorhandler(Exception)
+def beklenmeyen_web_hatasi(e):
+    # 404, 429 gibi normal HTTP durumları (HTTPException) kendi
+    # handler'larına veya varsayılan davranışına bırakılır — burada
+    # sadece gerçekten beklenmedik (500'e sebep olan) hatalar yakalanır.
+    if isinstance(e, HTTPException):
+        return e
+    logging.error("Web tarafında beklenmeyen hata", exc_info=True)
+    if YONETICI_ID:
+        try:
+            asyncio.run_coroutine_threadsafe(
+                application.bot.send_message(
+                    chat_id=YONETICI_ID,
+                    text=f"⚠️ Web formunda beklenmeyen bir hata oluştu:\n{type(e).__name__}: {e}"
+                ),
+                bot_loop
+            )
+        except Exception:
+            logging.error("Hata bildirimi gönderilemedi", exc_info=True)
+    return jsonify({"success": False, "error": "Beklenmeyen bir hata oluştu, lütfen daha sonra tekrar deneyin."}), 500
 
 def bot_motoru_baslat():
     asyncio.set_event_loop(bot_loop)
