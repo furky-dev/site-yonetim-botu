@@ -736,6 +736,24 @@ async def get_sikayet_fotografi(update: Update, context: ContextTypes.DEFAULT_TY
     await sikayeti_kaydet_ve_bildir(update.message.chat_id, context, foto_url)
     return ConversationHandler.END
 
+async def sikayet_cozuldu_bitir(kod, context: ContextTypes.DEFAULT_TYPE, cozum_notu=None):
+    guncelleme = {"durum": "Çözüldü"}
+    if cozum_notu:
+        guncelleme["cozum_notu"] = cozum_notu
+    supabase.table("sikayetler").update(guncelleme).eq("takip_kodu", kod).execute()
+    s = supabase.table("sikayetler").select("sakin_id").eq("takip_kodu", kod).execute().data[0]
+    mesaj = f"🔔 Şikayet ({kod}) durumu: Çözüldü oldu."
+    if cozum_notu:
+        mesaj += f"\n📝 Açıklama: {cozum_notu}"
+    await context.bot.send_message(int(s['sakin_id']), mesaj)
+
+async def cozum_notu_al(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kod = context.user_data.pop('bekleyen_cozum_kod', None)
+    if not kod:
+        return
+    await sikayet_cozuldu_bitir(kod, context, update.message.text)
+    await yonetici_panel(update, context)
+
 # --- YÖNETİCİ PANELİ ---
 async def yonetici_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     yeni = supabase.table("sikayetler").select("*", count='exact').eq("durum", "Beklemede").execute().count
@@ -754,6 +772,9 @@ async def yonetici_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    # Panelde başka bir yere gidilirse bekleyen "çözüm açıklaması" isteği iptal olsun
+    # (yoksa yönetici alakasız bir mesaj yazınca yanlış şikayete not eklenebilir).
+    context.user_data.pop('bekleyen_cozum_kod', None)
     if query.data == "liste_yeni" or query.data == "liste_inceleme":
         d_map = {"liste_yeni": "Beklemede", "liste_inceleme": "İnceleniyor"}
         durum = d_map[query.data]
@@ -781,10 +802,24 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif query.data.startswith("durum_"):
         _, yeni, kod = query.data.split("_")
-        d = "İnceleniyor" if yeni == "inceleme" else "Çözüldü"
-        supabase.table("sikayetler").update({"durum": d}).eq("takip_kodu", kod).execute()
-        s = supabase.table("sikayetler").select("sakin_id").eq("takip_kodu", kod).execute().data[0]
-        await context.bot.send_message(int(s['sakin_id']), f"🔔 Şikayet ({kod}) durumu: {d} oldu.")
+        if yeni == "inceleme":
+            supabase.table("sikayetler").update({"durum": "İnceleniyor"}).eq("takip_kodu", kod).execute()
+            s = supabase.table("sikayetler").select("sakin_id").eq("takip_kodu", kod).execute().data[0]
+            await context.bot.send_message(int(s['sakin_id']), f"🔔 Şikayet ({kod}) durumu: İnceleniyor oldu.")
+            await yonetici_panel(update, context)
+        else:
+            context.user_data['bekleyen_cozum_kod'] = kod
+            kb = [[InlineKeyboardButton("⏭️ Açıklama eklemeden gönder", callback_data=f"cozum_atla_{kod}")]]
+            try: await query.message.delete()
+            except: pass
+            await context.bot.send_message(
+                query.message.chat_id,
+                "✅ Şikayeti çözüldü olarak işaretlemek üzeresiniz.\n\nSakine gönderilecek bir açıklama yazıp gönderebilir, ya da açıklama eklemeden devam edebilirsiniz.",
+                reply_markup=InlineKeyboardMarkup(kb)
+            )
+    elif query.data.startswith("cozum_atla_"):
+        _, _, kod = query.data.split("_")
+        await sikayet_cozuldu_bitir(kod, context)
         await yonetici_panel(update, context)
 
 async def bot_hata_yakalayici(update, context):
@@ -833,6 +868,7 @@ application.add_handler(CommandHandler('panel', yonetici_panel))
 application.add_handler(MessageHandler(filters.Text([SIKAYETLERIM_BUTONU]), sikayetlerim))
 application.add_handler(CallbackQueryHandler(kategori_secimi, pattern="^(Asansör|Aydınlatma|Temizlik|Diğer)$"))
 application.add_handler(CallbackQueryHandler(panel_callback))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.Chat(chat_id=int(YONETICI_ID)), cozum_notu_al))
 application.add_error_handler(bot_hata_yakalayici)
 
 bot_loop = asyncio.new_event_loop()
