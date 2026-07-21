@@ -7,6 +7,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from supabase import create_client, Client
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, BotCommand, BotCommandScopeChat
+from telegram.error import BadRequest
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler, filters,
     ContextTypes, CallbackQueryHandler, ConversationHandler
@@ -729,7 +730,14 @@ async def yonetici_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     yeni = supabase.table("sikayetler").select("*", count='exact').eq("durum", "Beklemede").execute().count
     inceleme = supabase.table("sikayetler").select("*", count='exact').eq("durum", "İnceleniyor").execute().count
     kb = [[InlineKeyboardButton(f"🆕 Yeni ({yeni})", callback_data="liste_yeni"), InlineKeyboardButton(f"⏳ İnceleme ({inceleme})", callback_data="liste_inceleme")]]
-    if update.callback_query: await update.callback_query.edit_message_text("⚙️ Yönetici Paneli:", reply_markup=InlineKeyboardMarkup(kb))
+    if update.callback_query:
+        try:
+            await update.callback_query.edit_message_text("⚙️ Yönetici Paneli:", reply_markup=InlineKeyboardMarkup(kb))
+        except BadRequest:
+            # Detay ekranı fotoğraflı şikayette send_photo ile açılmış olabilir;
+            # o mesajın "caption"ı var ama "text"i yok, edit_message_text bu yüzden patlar.
+            await update.callback_query.message.delete()
+            await context.bot.send_message(update.callback_query.message.chat_id, "⚙️ Yönetici Paneli:", reply_markup=InlineKeyboardMarkup(kb))
     else: await update.message.reply_text("⚙️ Yönetici Paneli:", reply_markup=InlineKeyboardMarkup(kb))
 
 async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
