@@ -28,6 +28,17 @@ SIKAYETLERIM_BUTONU = "📋 Şikayetlerim"
 # --- YARDIMCI FONKSİYONLAR ---
 def takip_kodu_uret(): return f"#SB-{''.join(random.choices(string.digits, k=4))}"
 
+def benzersiz_takip_kodu_uret():
+    # 4 haneli kod sadece 10.000 ihtimal sunuyor; şikayet sayısı arttıkça
+    # çakışma olasılığı ciddileşiyor (doğum günü paradoksu), bu yüzden
+    # kaydetmeden önce veritabanında zaten var mı diye kontrol ediyoruz.
+    for _ in range(20):
+        kod = takip_kodu_uret()
+        var = supabase.table("sikayetler").select("takip_kodu").eq("takip_kodu", kod).execute().data
+        if not var:
+            return kod
+    raise RuntimeError("Benzersiz takip kodu üretilemedi, lütfen tekrar deneyin.")
+
 def kod_normallestir(ham):
     ham = ham.strip().upper()
     rakamlar = ''.join(ch for ch in ham if ch.isdigit())
@@ -693,7 +704,7 @@ async def get_sikayet_detay(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def sikayeti_kaydet_ve_bildir(chat_id, context: ContextTypes.DEFAULT_TYPE, foto_url):
     sakin = supabase.table("sakinler").select("*").eq("telegram_id", str(chat_id)).execute().data[0]
     aciklama = context.user_data['aciklama']
-    kod = takip_kodu_uret()
+    kod = benzersiz_takip_kodu_uret()
     supabase.table("sikayetler").insert({
         "sakin_id": int(sakin['telegram_id']), "ad_soyad": sakin['ad_soyad'], "daire_no": sakin['daire_no'],
         "kat_blok": sakin.get('kat_blok', ''), "kategori": context.user_data['kategori'],
@@ -882,7 +893,7 @@ def sikayet_al():
     if foto and foto.filename:
         foto_url = upload_web_photo_to_supabase(foto)
 
-    kod = takip_kodu_uret()
+    kod = benzersiz_takip_kodu_uret()
     supabase.table("sikayetler").insert({
         "ad_soyad": ad_soyad, "daire_no": daire_no, "kat_blok": kat_blok,
         "kategori": kategori, "aciklama": aciklama, "fotograf_url": foto_url,
